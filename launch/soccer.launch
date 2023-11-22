@@ -18,10 +18,15 @@
     <param name="angle_unit" value="30" />
   </node>
 
-  <!-- OP3 Soccer -->
+  <!-- Read Write -->
   <node pkg="soccer_pkg" type="read_write" name="op3_read_write" output="screen">
     <param name="gazebo_sim" value="false" type="bool"/>
     <param name="manager_name" value="/$(arg robot_name)/op3_manager"/>
   </node>
+
+  <!-- Vision Node -->
+  <node pkg="usb_cam" type="usb_cam" name="usb_cam" output="screen" />
+  <node pkg="soccer_pkg" type="vision_node.py" name="op3_vision_node" output="screen" />
+
 </group>
 </launch>
