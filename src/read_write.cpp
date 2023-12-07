@@ -40,11 +40,14 @@ bool getJointPose();
 void waitFollowing();
 
 void calcFootstep(double target_distance, double target_angle, double delta_time, double& fb_move, double& rl_angle);
+void setWalkingParam(double x_move, double y_move, double rotation_angle, bool balance = true);
 bool processFollowing();
 void waitFollowing();
 
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg);
-void callbackJointstates(const sensor_msgs::JointState::ConstPtr& msg);
+void callbackPosition(const geometry_msgs::Point& msg);
+void callbackJointStates(const sensor_msgs::JointState& msg);
+void callbackError(const geometry_msgs::Point& msg);
 
 double rest_inc = 0.2181;
 //rest_inc =0.2618 15°
@@ -57,6 +60,12 @@ double rpy_orientation;
 const double FALL_FORWARD_LIMIT = 55;
 const double FALL_BACK_LIMIT = -55;
 double present_pitch_;
+double head_pan;
+double head_tilt;
+double positionx;
+double positiony;
+double errorx;
+double errory;
 int page;
 int state;
 
@@ -71,8 +80,8 @@ float posiciones2[row2][col2];
 const double SPOT_FB_OFFSET = 0.0;
 const double SPOT_RL_OFFSET = 0.0;
 const double SPOT_ANGLE_OFFSET = 0.0;
-const double current_x_move_ = 0.005;
-const double current_r_angle_ = 0.0;
+double current_x_move_ = 0.005;
+double current_r_angle_ = 0.0;
 const double IN_PLACE_FB_STEP = -0.003;
 const int NOT_FOUND_THRESHOLD = 0.5;
 int count_not_found_ = 0;
@@ -80,17 +89,15 @@ int count_to_kick_ = 0;
 const double CAMERA_HEIGHT = 0.46;
 const double FOV_WIDTH = 35.2 * M_PI / 180;
 const double FOV_HEIGHT = 21.6 * M_PI / 180;
-const double hip_pitch_offset_ = 7.0;
-const double UNIT_FB_STEP = 1.0 * 0.001;
-const double UNIT_RL_TURN = 0.5 * M_PI / 180;
-const double MAX_FB_STEP = 40.0 * 0.001;
-const double MAX_RL_TURN = 15.0 * M_PI / 180;
-const double MIN_FB_STEP = 5.0 * 0.001;
-const double MIN_RL_TURN = 5.0 * M_PI / 180;
-const double current_x_move_ = 0.005;
-const double current_r_angle_ = 0;
-const double accum_period_time_ = 0.0;
-prev_time_ = ros::Time::now();
+const double hip_pitch_offset_ = 0.12217305;  //7°
+const double UNIT_FB_STEP = 0.002;
+const double UNIT_RL_TURN = 0.00872665;  //0.5°
+const double MAX_FB_STEP = 0.04;
+const double MAX_RL_TURN =  0.26179939;  //15°
+const double MIN_FB_STEP = 0.003;
+const double MIN_RL_TURN = 0.08726646;  //5°
+double accum_period_time = 0.0;
+double current_period_time = 0.6;
 
 enum ControlModule
 {
@@ -104,13 +111,17 @@ const bool DEBUG_PRINT = false;
 
 ros::Publisher init_pose_pub;
 ros::Publisher dxl_torque_pub;
-ros::Publisher write_joint_pub;
+ros::Publisher write_head_joint_pub;
 ros::Publisher vision_case_pub;
 ros::Publisher action_pose_pub;
 ros::Publisher walk_command_pub;
 ros::Publisher set_walking_param_pub;
+ros::Publisher reset_body_pub;
+
 ros::Subscriber read_joint_sub;
 ros::Subscriber imu_sub;
+ros::Subscriber position_sub;
+ros::Subscriber error_sub;
 
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
@@ -134,6 +145,8 @@ int main(int argc, char **argv)
 
   //subscribers
   read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
+  position_sub = nh.subscribe("/position", 5, callbackPosition);
+  error_sub = nh.subscribe("/error", 5, callbackError);
   //ros::Subscriber error_sub = nh.subscribe("/error", 5, callbackError);
   //ros::Subscriber position_sub = nh.subscribe("/position", 5, callbackPosition);
   //ros::Subscriber joint_error_sub = nh.subscribe("/robotis/present_joint_states", 5, CallBack);
@@ -161,18 +174,18 @@ int main(int argc, char **argv)
   //publishers
   init_pose_pub = nh.advertise<std_msgs::String>("/robotis/base/ini_pose", 0);
   dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis/dxl_torque", 0);
-  write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis/set_joint_states", 0);
+  write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis/head_control/set_joint_states", 0);
   vision_case_pub = nh.advertise<std_msgs::Bool>("/vision_case", 1000);
   action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis/action/page_num", 0);
   walk_command_pub = nh.advertise<std_msgs::String>("/robotis/walking/command", 0);
-  set_walking_param_pub_ = nh_.advertise<op3_walking_module_msgs::WalkingParam>("/robotis/walking/set_params", 0);
+  set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis/walking/set_params", 0);
   reset_body_pub = nh.advertise<std_msgs::Bool>("/robotis/online_walking/reset_body", 0);
 
   //services
   set_joint_module_client = nh.serviceClient<robotis_controller_msgs::SetModule>("/robotis/set_present_ctrl_modules");
   is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis/action/is_running");
   get_param_client = nh.serviceClient<op3_walking_module_msgs::GetWalkingParam>("/robotis/walking/get_params");
-  get_joint_client = nh.serviceClient<op3_online_walking_module_msgs::GetJointPose>("robotis/online_walking/get_joint_pose");
+  //get_joint_client = nh.serviceClient<op3_online_walking_module_msgs::GetJointPose>("robotis/online_walking/get_joint_pose");
 
   ros::start();
 
@@ -180,7 +193,7 @@ int main(int argc, char **argv)
   ros::Rate loop_rate(SPIN_RATE);
 
   //wait for starting of op3_manager
-  std::string manager_name = "/robot1/op3_manager";
+  std::string manager_name = "/op3_manager";
   while (ros::ok())
   {
     ros::Duration(1.0).sleep();
@@ -203,7 +216,7 @@ int main(int argc, char **argv)
   ros::Duration(1).sleep();
   ros::Rate loop_rate_pararse(60);
   
-  for (int fila2=0; fila2<row2; fila2++)
+  /*for (int fila2=0; fila2<row2; fila2++)
   {
     write_msg.name.push_back("r_ank_pitch");
     write_msg.position.push_back(posiciones2[fila2][0]);
@@ -245,16 +258,670 @@ int main(int argc, char **argv)
 
   while (ros::ok())
   {
-    ros::spinOnce();
-    ros::Rate loop_rate(SPIN_RATE);
+	ros::spinOnce();
+	ros::Rate loop_rate(SPIN_RATE);
 
-    std::string command = "start";
-    goWalk(command);
-    ros::Duration(3.0).sleep();
-    command = "stop";
-    goWalk(command);
-  }
-  return 0;
+	//std::string command = "start";
+	//goWalk(command);
+	getWalkingParam();
+	setWalkingParam(0.02, 0, -0.0872664600611, true);
+	std_msgs::String command_msg;
+	command_msg.data = "start";
+	walk_command_pub.publish(command_msg);
+	
+	ros::Duration(3.0).sleep();
+	command = "stop";
+	goWalk(command);
+	ros::Duration(3.0).sleep();
+  }*/
+  
+  setModule("walking_module");
+  ros::Time prev_time_ = ros::Time::now();
+  
+  
+  while (ros::ok()){
+        ros::Rate loop_rate(SPIN_RATE);
+        ros::spinOnce();
+
+        write_msg.name.push_back("head_pan");
+        write_msg.position.push_back(positionx);
+        write_msg.name.push_back("head_tilt");
+        write_msg.position.push_back(positiony);
+        write_head_joint_pub.publish(write_msg);
+        //errorx = 0;
+        //errory = 0;
+        
+        /*if ((errorx > -30 && errorx < 30) && (errory > -30 && errory < 30)){
+  	
+	  	ros::Time curr_time = ros::Time::now();
+		ros::Duration dur = curr_time - prev_time_;
+		double delta_time = dur.nsec * 0.000000001 + dur.sec;
+		std::cout << delta_time << std::endl;
+		prev_time_ = curr_time;
+
+		count_not_found_ = 0;
+
+		double distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
+
+		if (distance_to_ball < 0)
+		distance_to_ball *= (-1);
+
+		double distance_to_kick = 0.22;
+		if ((distance_to_ball < distance_to_kick) ){ //&& (fabs(ball_x_angle) < 25.0) to kick
+			count_to_kick_ += 1;	
+			std::cout << count_to_kick_ << std::endl;
+			if (count_to_kick_ > 20){
+				std::string command = "stop";
+				goWalk(command);
+				if (head_pan > 0){ //left
+					//goAction(122); //left kick
+					//setModule("none");
+					//Inclinarse para alinear el centro de masa
+					ros::Duration(1).sleep();
+					/*write_msg.name.push_back("l_hip_roll");
+					write_msg.position.push_back(0.17);
+					write_msg.name.push_back("r_hip_roll");
+					write_msg.position.push_back(0.17);
+					write_msg.name.push_back("r_ank_roll");
+					write_msg.position.push_back(-0.15);
+					write_msg.name.push_back("l_ank_roll");
+					write_msg.position.push_back(-0.45);
+					write_joint_pub.publish(write_msg);
+
+					//Posiciòn de seguridad
+					ros::Duration(0.1).sleep();
+					write_msg.name.push_back("l_ank_pitch");
+					write_msg.position.push_back(0.7091);
+					write_msg.name.push_back("l_knee");
+					write_msg.position.push_back(1.5287);
+					write_msg.name.push_back("l_hip_pitch");
+					write_msg.position.push_back(-0.9474 - rest_inc);
+					write_msg.name.push_back("l_ank_roll");
+					write_msg.position.push_back(0);
+					write_joint_pub.publish(write_msg);
+
+					//Patada
+					ros::Duration(0.1).sleep();
+					write_msg.name.push_back("l_ank_pitch");
+					write_msg.position.push_back(0.0046);
+					write_msg.name.push_back("l_knee");
+					write_msg.position.push_back(0.7420);
+					write_msg.name.push_back("l_hip_pitch");
+					write_msg.position.push_back(-1.2287 - rest_inc);
+					write_joint_pub.publish(write_msg);
+
+					ros::Duration(0.05).sleep();
+					write_msg.name.push_back("l_knee");
+					write_msg.position.push_back(0);
+					write_msg.name.push_back("l_hip_pitch");
+					write_msg.position.push_back(-1.5 - rest_inc);
+					write_joint_pub.publish(write_msg);
+
+					//Posiciòn de seguridad
+					ros::Duration(0.1).sleep();
+					write_msg.name.push_back("l_ank_pitch");
+					write_msg.position.push_back(0.7091);
+					write_msg.name.push_back("l_knee");
+					write_msg.position.push_back(1.8);
+					write_msg.name.push_back("l_hip_pitch");
+					write_msg.position.push_back(-1.4 - rest_inc);
+					write_msg.name.push_back("l_ank_roll");
+					write_msg.position.push_back(0);
+					write_joint_pub.publish(write_msg);
+
+					//Regreso
+					ros::Duration(0.2).sleep();
+					write_msg.name.push_back("l_hip_roll");
+					write_msg.position.push_back(-0.0873);
+					write_msg.name.push_back("r_hip_roll");
+					write_msg.position.push_back(0.0873);
+					write_msg.name.push_back("l_ank_roll");
+					write_msg.position.push_back(-0.0873);
+					write_msg.name.push_back("r_ank_roll");
+					write_msg.position.push_back(0.0873);
+
+					write_msg.name.push_back("l_ank_pitch");
+					write_msg.position.push_back(posiciones2[row2-1][3]);
+					write_msg.name.push_back("l_knee");
+					write_msg.position.push_back(posiciones2[row2-1][4]);
+					write_msg.name.push_back("l_hip_pitch");
+					write_msg.position.push_back(posiciones2[row2-1][5] - rest_inc);
+					write_joint_pub.publish(write_msg);*/
+
+					/*ros::Duration(1).sleep();
+				}
+				else{ //right
+					//goAction(122); //right kick
+					//setModule("none");
+					//Inclinarse para alinear el centro de masa
+					/*ros::Duration(1).sleep();
+					write_msg.name.push_back("l_hip_roll");
+					write_msg.position.push_back(-0.17);
+					write_msg.name.push_back("r_hip_roll");
+					write_msg.position.push_back(-0.17);
+					write_msg.name.push_back("l_ank_roll");
+					write_msg.position.push_back(0.15);
+					write_msg.name.push_back("r_ank_roll");
+					write_msg.position.push_back(0.45);
+					write_joint_pub.publish(write_msg);
+
+					//Posiciòn de seguridad
+					ros::Duration(0.1).sleep();
+					write_msg.name.push_back("r_ank_pitch");
+					write_msg.position.push_back(-0.7091);
+					write_msg.name.push_back("r_knee");
+					write_msg.position.push_back(-1.5287);
+					write_msg.name.push_back("r_hip_pitch");
+					write_msg.position.push_back(0.9474 + rest_inc);
+					write_msg.name.push_back("r_ank_roll");
+					write_msg.position.push_back(0);
+					write_joint_pub.publish(write_msg);
+
+					//Patada
+					ros::Duration(0.1).sleep();
+
+					write_msg.name.push_back("r_ank_pitch");
+					write_msg.position.push_back(-0.0046);
+					write_msg.name.push_back("r_knee");
+					write_msg.position.push_back(-0.7420);
+					write_msg.name.push_back("r_hip_pitch");
+					write_msg.position.push_back(1.2287 + rest_inc);
+					write_joint_pub.publish(write_msg);
+
+					ros::Duration(0.05).sleep();
+					write_msg.name.push_back("r_knee");
+					write_msg.position.push_back(0);
+					write_msg.name.push_back("r_hip_pitch");
+					write_msg.position.push_back(1.5 + rest_inc);
+					write_joint_pub.publish(write_msg);
+
+					//Posiciòn de seguridad
+					ros::Duration(0.1).sleep();
+					write_msg.name.push_back("r_ank_pitch");
+					write_msg.position.push_back(-0.7091);
+					write_msg.name.push_back("r_knee");
+					write_msg.position.push_back(-1.8);
+					write_msg.name.push_back("r_hip_pitch");
+					write_msg.position.push_back(1.4 + rest_inc);
+					write_msg.name.push_back("r_ank_roll");
+					write_msg.position.push_back(0);
+					write_joint_pub.publish(write_msg);
+
+					//Regreso
+					ros::Duration(0.2).sleep();
+					write_msg.name.push_back("l_hip_roll");
+					write_msg.position.push_back(-0.0873);
+					write_msg.name.push_back("r_hip_roll");
+					write_msg.position.push_back(0.0873);
+					write_msg.name.push_back("l_ank_roll");
+					write_msg.position.push_back(-0.0873);
+					write_msg.name.push_back("r_ank_roll");
+					write_msg.position.push_back(0.0873);
+
+					write_msg.name.push_back("r_ank_pitch");
+					write_msg.position.push_back(posiciones2[row2-1][0]);
+					write_msg.name.push_back("r_knee");
+					write_msg.position.push_back(posiciones2[row2-1][1]);
+					write_msg.name.push_back("r_hip_pitch");
+					write_msg.position.push_back(posiciones2[row2-1][2] + rest_inc);
+					write_joint_pub.publish(write_msg);*/
+
+					/*ros::Duration(1).sleep();
+				}
+			}
+			else if (count_to_kick_ > 15){
+				getWalkingParam();
+				setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
+
+				std_msgs::String command_msg;
+				command_msg.data = "start";
+				walk_command_pub.publish(command_msg);
+			}
+		}else{
+			count_to_kick_ = 0;
+		}
+
+		double fb_move = 0.0, rl_angle = 0.0;
+		double distance_to_walk = distance_to_ball - distance_to_kick;
+
+		calcFootstep(distance_to_walk, head_pan, delta_time, fb_move, rl_angle);
+
+		getWalkingParam();
+		setWalkingParam(fb_move, 0, rl_angle, true);
+		std::cout << fb_move << " " << rl_angle << std::endl;
+		
+		std_msgs::String command_msg;
+		command_msg.data = "start";
+		walk_command_pub.publish(command_msg);
+		}else{
+		std::cout << "DETENERSE" << std::endl;
+			/*std::string command = "stop";
+			goWalk(command);
+		    	ros::Duration(1.5).sleep();*/
+		//}
+	}
+	return 0;
+        /*ros::spinOnce();
+        ros::Rate loop_rate(SPIN_RATE);
+
+        write_msg.name.push_back("head_pan");
+        write_msg.position.push_back(positionx);
+        write_msg.name.push_back("head_tilt");
+        write_msg.position.push_back(positiony);
+        write_joint_pub.publish(write_msg);
+
+        if (area > 35000 && head_pan > 0 && head_tilt < -1.05){
+
+            std::cout  << "PATEAA SIUUUUUUU" << std::endl;
+
+            ///////////////////// Patada larga //////////////////////////
+            //Detenerse
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][0]);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][1]);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc);
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][3]);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][4]);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            //Inclinarse para alinear el centro de masa
+            ros::Duration(1).sleep();
+                write_msg.name.push_back("l_hip_roll");
+            write_msg.position.push_back(0.17);
+                write_msg.name.push_back("r_hip_roll");
+            write_msg.position.push_back(0.17);
+            write_msg.name.push_back("r_ank_roll");
+            write_msg.position.push_back(-0.15);
+            write_msg.name.push_back("l_ank_roll");
+            write_msg.position.push_back(-0.45);
+            write_joint_pub.publish(write_msg);
+            
+            //Posiciòn de seguridad
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(0.7091);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(1.5287);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-0.9474 - rest_inc);
+            write_msg.name.push_back("l_ank_roll");
+            write_msg.position.push_back(0);
+            write_joint_pub.publish(write_msg);
+            
+            //Patada
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(0.0046);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(0.7420);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-1.2287 - rest_inc);
+            write_joint_pub.publish(write_msg);
+
+            ros::Duration(0.05).sleep();
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(0);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-1.5 - rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            //Posiciòn de seguridad
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(0.7091);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(1.8);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-1.4 - rest_inc);
+            write_msg.name.push_back("l_ank_roll");
+            write_msg.position.push_back(0);
+            write_joint_pub.publish(write_msg);
+            
+            //Regreso
+            ros::Duration(0.2).sleep();
+            write_msg.name.push_back("l_hip_roll");
+            write_msg.position.push_back(-0.0873);
+            write_msg.name.push_back("r_hip_roll");
+            write_msg.position.push_back(0.0873);
+            write_msg.name.push_back("l_ank_roll");
+            write_msg.position.push_back(-0.0873);
+            write_msg.name.push_back("r_ank_roll");
+            write_msg.position.push_back(0.0873);
+            
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][3]);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][4]);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc);
+            write_joint_pub.publish(write_msg);
+
+
+
+
+
+
+
+            ros::Duration(1).sleep();
+          }
+
+
+        else if (area > 35000 && head_pan < 0 && head_tilt < -1.05){
+
+            std::cout  << "PATEAA SIUUUUUUU" << std::endl;
+
+            ///////////////////// Patada larga //////////////////////////
+            //Detenerse
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][0]);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][1]);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc);
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][3]);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][4]);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            //Inclinarse para alinear el centro de masa
+            ros::Duration(1).sleep();
+                write_msg.name.push_back("l_hip_roll");
+            write_msg.position.push_back(-0.17);
+                write_msg.name.push_back("r_hip_roll");
+            write_msg.position.push_back(-0.17);
+            write_msg.name.push_back("l_ank_roll");
+            write_msg.position.push_back(0.15);
+            write_msg.name.push_back("r_ank_roll");
+            write_msg.position.push_back(0.45);
+            write_joint_pub.publish(write_msg);
+            
+            //Posiciòn de seguridad
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(-0.7091);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(-1.5287);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(0.9474 + rest_inc);
+            write_msg.name.push_back("r_ank_roll");
+            write_msg.position.push_back(0);
+            write_joint_pub.publish(write_msg);
+            
+            //Patada
+            ros::Duration(0.1).sleep();
+            
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(-0.0046);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(-0.7420);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(1.2287 + rest_inc);
+            write_joint_pub.publish(write_msg);
+
+            ros::Duration(0.05).sleep();
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(0);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(1.5 + rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            //Posiciòn de seguridad
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(-0.7091);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(-1.8);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(1.4 + rest_inc);
+            write_msg.name.push_back("r_ank_roll");
+            write_msg.position.push_back(0);
+            write_joint_pub.publish(write_msg);
+            
+            //Regreso
+            ros::Duration(0.2).sleep();
+            write_msg.name.push_back("l_hip_roll");
+            write_msg.position.push_back(-0.0873);
+            write_msg.name.push_back("r_hip_roll");
+            write_msg.position.push_back(0.0873);
+            write_msg.name.push_back("l_ank_roll");
+            write_msg.position.push_back(-0.0873);
+            write_msg.name.push_back("r_ank_roll");
+            write_msg.position.push_back(0.0873);
+            
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][0]);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][1]);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc);
+            write_joint_pub.publish(write_msg);
+
+
+
+
+
+
+
+            ros::Duration(1).sleep();
+          }else if(head_pan > -0.4 && head_pan < 0.4 && (errorx > -40 && errorx < 40) && (errory > -40 && errory < 40)){
+            
+            std::cout  << "Caminando ando :p" << std::endl;
+            //Pie izquierdo
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(0.7520);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(1.5317);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-0.8143-rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(0.5486);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(1.1446);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-0.6618-rest_inc);
+            write_msg.name.push_back("r_ank_pitch");	//Pie derecho se acomoda para que centro de masa quede en medio de ambos pies
+            write_msg.position.push_back(-0.5845);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(-1.1453);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(0.5233+rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            //Pie derecho
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(-0.7520);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(-1.5317);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(0.8143+rest_inc);
+            write_joint_pub.publish(write_msg);
+            
+            ros::Duration(0.1).sleep();
+            write_msg.name.push_back("r_ank_pitch");	
+            write_msg.position.push_back(-0.5486);		//-0.5486  <- valor matlab
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(-1.1446);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(0.6618+rest_inc);
+            write_msg.name.push_back("l_ank_pitch");	//Pie izquierdo se acomoda para que centro de masa quede en medio de ambos pies
+            write_msg.position.push_back(0.5845);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(1.1453);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(-0.5233-rest_inc);
+            
+            write_joint_pub.publish(write_msg);
+          }else if (errorx > -5 && errorx < 5 && errory > -25 && errory < 25 && (head_pan < -0.1745 || head_pan > 0.1745)){
+            //Detenerse
+            write_msg.name.push_back("r_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][0]);
+            write_msg.name.push_back("r_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][1]);
+            write_msg.name.push_back("r_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc);
+            write_msg.name.push_back("l_ank_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][3]);
+            write_msg.name.push_back("l_knee");
+            write_msg.position.push_back(posiciones2[ult_pos][4]);
+            write_msg.name.push_back("l_hip_pitch");
+            write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc);
+            write_joint_pub.publish(write_msg);
+
+            ros::Duration(0.5).sleep();
+
+            if (head_pan > 0){
+                std::cout  << "Izquierda :0" << std::endl;
+                //Levantar pie izquierdo
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("l_ank_pitch");
+                write_msg.position.push_back(0.7520);
+                write_msg.name.push_back("l_knee");
+                write_msg.position.push_back(1.5317);
+                write_msg.name.push_back("l_hip_pitch");
+                write_msg.position.push_back(-0.8143 - rest_inc_giro);
+                write_msg.name.push_back("r_hip_yaw");
+                write_msg.position.push_back(0.1746*1.5);
+                write_msg.name.push_back("l_hip_yaw");
+                write_msg.position.push_back(-0.1746*1.5);
+
+                write_msg.name.push_back("l_hip_roll");
+                write_msg.position.push_back(-0.0873);
+                write_msg.name.push_back("r_hip_roll");
+                write_msg.position.push_back(0.0873);
+                write_msg.name.push_back("l_ank_roll");
+                write_msg.position.push_back(-0.0873);
+                write_msg.name.push_back("r_ank_roll");
+                write_msg.position.push_back(0.0873);
+                write_joint_pub.publish(write_msg);
+                
+
+                //Bajar pie izquierdo
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("l_ank_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][3]);
+                write_msg.name.push_back("l_knee");
+                write_msg.position.push_back(posiciones2[ult_pos][4]);
+                write_msg.name.push_back("l_hip_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][5]);
+                write_joint_pub.publish(write_msg);
+                
+                //Levantar pie derecho
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("r_ank_pitch");
+                write_msg.position.push_back(-0.7520);
+                write_msg.name.push_back("r_knee");
+                write_msg.position.push_back(-1.5317);
+                write_msg.name.push_back("r_hip_pitch");
+                write_msg.position.push_back(0.8143 + rest_inc_giro);
+                write_msg.name.push_back("l_hip_yaw");
+                write_msg.position.push_back(0);
+                write_msg.name.push_back("r_hip_yaw");
+                write_msg.position.push_back(0);
+                write_joint_pub.publish(write_msg);
+                
+                //Bajar pie izquierdo
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("r_ank_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][0]);
+                write_msg.name.push_back("r_knee");
+                write_msg.position.push_back(posiciones2[ult_pos][1]);
+                write_msg.name.push_back("r_hip_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc_giro);
+                write_joint_pub.publish(write_msg);
+            }else{
+                std::cout  << "Derechaaaa D:" << std::endl;
+                //Levantar pie derecho 
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("r_ank_pitch");
+                write_msg.position.push_back(-0.7091);
+                write_msg.name.push_back("r_knee");
+                write_msg.position.push_back(-1.4131);
+                write_msg.name.push_back("r_hip_pitch");
+                write_msg.position.push_back(0.7091 + rest_inc_giro);
+                write_msg.name.push_back("r_hip_yaw");
+                write_msg.position.push_back(0.1746*1.5);
+                write_msg.name.push_back("l_hip_yaw");
+                write_msg.position.push_back(-0.1746*1.5);
+
+                write_msg.name.push_back("l_hip_roll");
+                write_msg.position.push_back(-0.0873);
+                write_msg.name.push_back("r_hip_roll");
+                write_msg.position.push_back(0.0873);
+                write_msg.name.push_back("l_ank_roll");
+                write_msg.position.push_back(-0.0873);
+                write_msg.name.push_back("r_ank_roll");
+                write_msg.position.push_back(0.0873);
+                write_joint_pub.publish(write_msg);
+
+                //Bajar pie derecho
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("r_ank_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][0]);
+                write_msg.name.push_back("r_knee");
+                write_msg.position.push_back(posiciones2[ult_pos][1]);
+                write_msg.name.push_back("r_hip_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc_giro);
+                write_joint_pub.publish(write_msg);
+                
+                //Levantar pie izquierdo
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("l_ank_pitch");
+                write_msg.position.push_back(0.7091);
+                write_msg.name.push_back("l_knee");
+                write_msg.position.push_back(1.4131);
+                write_msg.name.push_back("l_hip_pitch");
+                write_msg.position.push_back(-0.7091 - rest_inc_giro);
+                write_msg.name.push_back("r_hip_yaw");
+                write_msg.position.push_back(0);
+                write_msg.name.push_back("l_hip_yaw");
+                write_msg.position.push_back(0);
+                write_joint_pub.publish(write_msg);
+                
+                //Bajar pie izquierdo
+                ros::Duration(0.1).sleep();
+                write_msg.name.push_back("l_ank_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][3]);
+                write_msg.name.push_back("l_knee");
+                write_msg.position.push_back(posiciones2[ult_pos][4]);
+                write_msg.name.push_back("l_hip_pitch");
+                write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc_giro);
+                write_joint_pub.publish(write_msg);
+            }
+          }else{
+            std::cout  << "Quieto -_-" << std::endl;
+            //Detenerse
+             ros::Duration(0.1).sleep();
+              write_msg.name.push_back("r_ank_pitch");
+              write_msg.position.push_back(posiciones2[ult_pos][0]);
+              write_msg.name.push_back("r_knee");
+              write_msg.position.push_back(posiciones2[ult_pos][1]);
+              write_msg.name.push_back("r_hip_pitch");
+              write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc);
+              write_msg.name.push_back("l_ank_pitch");
+              write_msg.position.push_back(posiciones2[ult_pos][3]);
+              write_msg.name.push_back("l_knee");
+              write_msg.position.push_back(posiciones2[ult_pos][4]);
+              write_msg.name.push_back("l_hip_pitch");
+              write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc);
+              write_joint_pub.publish(write_msg);
+              ros::Duration(0.1).sleep();
+    		}
+  	}  
+  return 0;*/
 }
 
 void readyToDemo()
@@ -297,6 +964,11 @@ void goWalk(std::string& command)
     getWalkingParam();
     setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
   }
+  /*else if (command == "stop"){
+    std::cout << "DETENERNSEEE" << std::endl;
+    getWalkingParam();
+    setWalkingParam(0, 0, 0, true);
+  }*/
 
   std_msgs::String command_msg;
   command_msg.data = command;
@@ -311,7 +983,7 @@ void waitFollowing()
     setWalkingParam(0.0, 0.0, 0.0);
 }
 
-bool processFollowing() 
+/*bool processFollowing() 
 {
   ros::Time curr_time = ros::Time::now();
   ros::Duration dur = curr_time - prev_time_;
@@ -320,7 +992,7 @@ bool processFollowing()
 
   count_not_found_ = 0;
 
-  double distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + current_tilt - hip_pitch_offset_);
+  double distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
 
   if (distance_to_ball < 0)
     distance_to_ball *= (-1);
@@ -332,7 +1004,7 @@ bool processFollowing()
   if (count_to_kick_ > 20)
     {
       setWalkingCommand("stop");
-      if (current_pan > 0) //left
+      if (head_pan > 0) //left
       {
         goAction(122); //left kick
         setModule("none");
@@ -359,11 +1031,11 @@ bool processFollowing()
   double fb_move = 0.0, rl_angle = 0.0;
   double distance_to_walk = distance_to_ball - distance_to_kick;
 
-  calcFootstep(distance_to_walk, current_pan_, delta_time, fb_move, rl_angle);
+  calcFootstep(distance_to_walk, head_pan, delta_time, fb_move, rl_angle);
 
   setWalkingParam(fb_move, 0, rl_angle);
   return false;
-}
+}*/
 
 void calcFootstep(double target_distance, double target_angle, double delta_time, double& fb_move, double& rl_angle) 
 {
@@ -372,10 +1044,10 @@ void calcFootstep(double target_distance, double target_angle, double delta_time
     target_distance = 0.0;
 
   double fb_goal = fmin(target_distance * 0.1, MAX_FB_STEP);
-  accum_period_time_ += delta_time;
-  if (accum_period_time_ > (curr_period_time_  / 4))
+  accum_period_time += delta_time;
+  if (accum_period_time > (current_period_time  / 4))
   {
-    accum_period_time_ = 0.0;
+    accum_period_time = 0.0;
     if ((target_distance * 0.1 / 2) < current_x_move_)
       next_movement -= UNIT_FB_STEP;
     else
@@ -448,10 +1120,10 @@ bool isActionRunning()
 
 void setWalkingParam(double x_move, double y_move, double rotation_angle, bool balance)
 {
-  current_walking_param_.balance_enable = balance;
-  current_walking_param_.x_move_amplitude = x_move + SPOT_FB_OFFSET;
-  current_walking_param_.y_move_amplitude = y_move + SPOT_RL_OFFSET;
-  current_walking_param_.angle_move_amplitude = rotation_angle + SPOT_ANGLE_OFFSET;
+  current_walking_param.balance_enable = balance;
+  current_walking_param.x_move_amplitude = x_move + SPOT_FB_OFFSET;
+  current_walking_param.y_move_amplitude = y_move + SPOT_RL_OFFSET;
+  current_walking_param.angle_move_amplitude = rotation_angle + SPOT_ANGLE_OFFSET;
 
   set_walking_param_pub.publish(current_walking_param);
 
@@ -461,7 +1133,8 @@ void setWalkingParam(double x_move, double y_move, double rotation_angle, bool b
 
 bool getWalkingParam() 
 {
-  op3_walking_module_msgs::GetWalkingParam get_param_srv;
+  /*op3_walking_module_msgs::GetWalkingParam get_param_srv;
+  op3_walking_module_msgs::GetWalkingParam walking_param_msg;
 
   if (get_param_client.call(get_param_srv) == false) {
     ROS_ERROR("Failed to get walking params");
@@ -472,12 +1145,44 @@ bool getWalkingParam()
       return true;
     }
   }
-  return false;
+  return false;*/
+  
+  op3_walking_module_msgs::GetWalkingParam walking_param_msg;
+
+  if (get_param_client.call(walking_param_msg))
+  {
+    current_walking_param = walking_param_msg.response.parameters;
+
+    // update ui
+    ROS_INFO_COND(DEBUG_PRINT, "Get walking parameters");
+
+    return true;
+  }
+  else
+  {
+    ROS_ERROR("Fail to get walking parameters.");
+
+    return false;
+  }
 }
 
-void callbackJointstates(const sensor_msgs::JointState::ConstPtr& msg) 
-{
+void callbackJointStates(const sensor_msgs::JointState& msg)
+{ 
+  head_pan = msg.position[0];
+  head_tilt = msg.position[1];
   return;
+}
+
+void callbackPosition(const geometry_msgs::Point& msg)
+{
+  positionx = msg.x;
+  positiony = msg.y;
+}
+
+void callbackError(const geometry_msgs::Point& msg)
+{
+  errorx = msg.x;
+  errory = msg.y;
 }
 
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) 
