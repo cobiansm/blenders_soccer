@@ -13,161 +13,190 @@ import math
 import std_msgs
 from std_msgs.msg import Bool
 
+
 gradient = lambda x1,y1,x2,y2: (y2-y1)/(x2-x1)
 
-ux = 0
-uy = 0
 
-ux1 = 0
-uy1 = 0
+class HeadControl:
+    def __init__(self):
+        rospy.init_node('PD_Head_Control')
+        self.image_pub = rospy.Publisher('/Vision_node', sensor_msgs.msg.Image, queue_size=1)
+        self.error_pub = rospy.Publisher('/error', geometry_msgs.msg.Point, queue_size=1)
+        self.position_pub = rospy.Publisher('/position', geometry_msgs.msg.Point, queue_size=1)
+        self.ball_pub = rospy.Publisher('/find_ball', std_msgs.msg.Bool, queue_size=1)
 
-Kpx = 0.002  # 0.0175
-Kix = 5
-Kdx = 0.0001
+        self.find_ball = Bool()
 
-Kpy = 0.002  # 0.0175
-Kiy = 5
-Kdy = 0.0001
+        self.bridge = CvBridge()
 
-Tm = 0.1 #100ms
+        subimg = rospy.Subscriber("/usb_cam/image_raw", Image, self.center_callback)
 
-t = 0
+        self.ux0 = 0
+        self.ux0 = 0
 
-case = True #True -> Pelota
-            #False -> Portería
+        self.ux1 = 0
+        self.uy1 = 0
 
-old_x1 = 0
-old_y1 = 0
-old_x2 = 0
-old_y2 = 0
+        self.kpx = 0
+        self.kdx = 0
+        self.kix = 0
 
-old_centerx = 0
-old_centery = 0
+        self.kpy = 0
+        self.kdy = 0
+        self.kiy = 0
 
-center = Point()
+        self.errx0 = 0
+        self.errx1 = 0
+        self.errx2 = 0
 
+        self.erry0 = 0
+        self.erry1 = 0
+        self.erry2 = 0
 
-def callbackCenter(ball_center):
-    global center
+        self.Tm = 0.1
+        self.t = 0
 
-    center.x = ball_center.x
-    center.y = ball_center.y
+        self.kernel = np.ones((5,5),np.uint8)
 
-    error(center.x, center.y)
+    def center_callback(self, img_msg):
 
+        rospy.loginfo(img_msg.header)
 
-def error(x, y):
-    x_center = 320
-    y_center = 240
+        try:
+            frame = self.bridge.imgmsg_to_cv2(img_msg, "passthrough")
+            #cv_img = cv2.flip(cv_img,1)
+        except CvBridgeError:
+            rospy.logerr("CvBridge Error")
 
-    errorx = x_center - x
-    errory = y_center - y
+        blurred = cv2.GaussianBlur(frame, (11, 11), 0)
 
-    errorx = errorx * 70/x_center
-    errory = errory * 70/y_center
+        nR = np.matrix(blurred[:,:,0])
+        nG = np.matrix(blurred[:,:,1])
+        nB = np.matrix(blurred[:,:,2])
 
-    point = Point()
-    point.x = errorx
-    point.y = errory
+        color = cv2.absdiff(nG,nR)
 
-    error_point = Point()
-    error_point.x = errorx
-    error_point.y = errory
+        _, umbral = cv2.threshold(color,50,255,cv2.THRESH_BINARY)
 
-    error_pub.publish(error_point)
+        mask = cv2.erode(umbral,np.ones((35,35), np.uint8))
+        mask = cv2.dilate(mask, None, iterations=2)
+        
+        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
 
-    control(point)
+        xb,yb,wb,hb = cv2.boundingRect(opening)
+        self.xball = int(xb+(wb/2))
+        self.yball = int(yb+(hb/2))
 
+        cv2.rectangle(frame, (xb,yb), (xb+wb,yb+hb), (255,0,0), 8)
+        cv2.circle(frame, (self.xball, self.yball), 5,  (255,255,255), 5)
 
-def control(point):
-    global ux
-    global uy
-    global ux1
-    global uy1
-    global Kpx
-    global Kpy
-    global Kdx
-    global Kdy
-    global Tm
-    global t
+        self.area = wb*hb
+        print(self.area)
 
-    errx0 = point.x
-    erry0 = point.y
+        final_img = self.bridge.cv2_to_imgmsg(frame, "rgb8")
+        self.image_pub.publish(final_img)
 
-    if errx0 != 70 and erry0 != 70:
+    def cal_err(self):
+        x_center = 320
+        y_center = 240
 
-        errx1 = 0
-        erry1 = 0
+        errorx = x_center - self.xball
+        errory = y_center - self.yball
 
-        errx2 = 0
-        erry2 = 0
+        errorx = errorx * 70/x_center
+        errory = errory * 70/y_center
 
-        ux = ux1 + (Kpx + Kdx/Tm)*errx0 + (-Kpx + Kix*Tm - 2*Kdx/Tm)*errx1 + (Kdx/Tm)*errx2
-        #ux = ux1 + (Kpx + Kdx/Tm)*errx0 + (-2*Kdx/Tm)*errx1 + (-Kpx + Kdx/Tm)*errx2
-        uy = uy1 + (Kpy + Kdy/Tm)*erry0 + (-Kpy + Kiy*Tm - 2*Kdy/Tm)*erry1 + (Kdy/Tm)*erry2
-        #uy = uy1 + (Kpy + Kdy/Tm)*erry0 + (-2*Kdy/Tm)*erry1 + (-Kpy + Kdy/Tm)*erry2
+        point = Point()
+        point.x = errorx
+        point.y = errory
 
-        if ux >= 70: ux = 70
-        elif ux <= -70: ux = 70
+        error_point = Point()
+        error_point.x = errorx
+        error_point.y = errory
 
-        if uy >= 0: uy = -5
-        elif uy <= -70: uy = -70
+        self.error_pub.publish(error_point)
 
-        ux1 = ux
-        errx1 = errx0
-        errx2 = errx1
+        return point
 
-        uy1 = uy
-        erry2 = erry1
-        erry1 = erry0
+    def control(self):
 
-        if (errx0 < -5 or errx0 > 5) or (erry0 < -5 or erry0 > 5):
+        point = self.cal_err()
 
-            ux = (ux*math.pi)/180
-            uy = (uy*math.pi)/180
+        self.errx0 = point.x
+        self.erry0 = point.y
+
+        if self.errx0 != 70 and self.erry0 != 70:
+
+            ux = ux1 + (self.kpx + self.kdx/self.Tm)*self.errx0 + (-self.kpx + self.kix*self.Tm - 2*self.kdx/self.Tm)*self.errx1 + (self.kdx/self.Tm)*self.errx2
+            #ux = ux1 + (Kpx + Kdx/Tm)*errx0 + (-2*Kdx/Tm)*errx1 + (-Kpx + Kdx/Tm)*errx2
+            uy = uy1 + (self.kpy + self.kdy/self.Tm)*self.erry0 + (-self.kpy + self.kiy*self.Tm - 2*self.kdy/self.Tm)*self.erry1 + (self.kdy/self.Tm)*self.erry2
+            #uy = uy1 + (Kpy + Kdy/Tm)*erry0 + (-2*Kdy/Tm)*erry1 + (-Kpy + Kdy/Tm)*erry2
+
+            if ux >= 70: ux = 70
+            elif ux <= -70: ux = 70
+
+            if uy >= 0: uy = -5
+            elif uy <= -70: uy = -70
+
+            ux1 = ux
+            self.errx1 = self.errx0
+            self.errx2 = self.errx1
+
+            uy1 = uy
+            self.erry2 = self.erry1
+            self.erry1 = self.erry0
+
+            #if ux > 3 or ux < -3:
+
+            if (self.errx0 < -5 or self.errx0 > 5) or (self.erry0 < -5 or self.erry0 > 5):
+
+                ux = (ux*math.pi)/180
+                uy = (uy*math.pi)/180
+
+                position_point = Point()
+                position_point.x = ux
+                position_point.y = uy
+                position_point.z = self.area
+
+                self.position_pub.publish(position_point)
+
+            self.find_ball.data = True
+            self.ball_pub.publish(self.find_ball)
+
+        else:
+            self.find_ball.data = False
+            self.ball_pub.publish(self.find_ball)
+
+            self.errx1 = 0
+            self.erry1 = 0
+
+            self.errx2 = 0
+            self.erry2 = 0
+        """else:
+            t += 1
+
+            if (t>360):
+                t=-360
+
+            ux_noball = 70*math.sin(0.1*t) #(t/(180/3.14159))
+
+            uy_noball = 20*math.cos(0.1*t) - 20
+
+            ux_noball = (ux_noball*math.pi)/180
+            uy_noball = (uy_noball*math.pi)/180
 
             position_point = Point()
-            position_point.x = ux
-            position_point.y = uy
 
-            position_pub.publish(position_point)
-    """else:
-        t += 1
+            position_point.x = ux_noball
+            position_point.y = uy_noball
 
-        if (t>360):
-            t=-360
-
-        ux_noball = 70*math.sin(0.1*t) #(t/(180/3.14159))
-
-        uy_noball = 20*math.cos(0.1*t) - 20
-
-        ux_noball = (ux_noball*math.pi)/180
-        uy_noball = (uy_noball*math.pi)/180
-
-        position_point = Point()
-
-        position_point.x = ux_noball
-        position_point.y = uy_noball
-
-        position_pub.publish(position_point)"""
+            position_pub.publish(position_point)"""
 
 
-rospy.init_node('image')
-pub = rospy.Publisher('/Head_Control_Node', sensor_msgs.msg.Image, queue_size=1)
-error_pub = rospy.Publisher('/error', geometry_msgs.msg.Point, queue_size=1)
-position_pub = rospy.Publisher('/position', geometry_msgs.msg.Point, queue_size=1)
-mov_pub = rospy.Publisher('/following', std_msgs.msg.Bool, queue_size=1)
-ball_pub = rospy.Publisher('/find_ball', std_msgs.msg.Bool, queue_size=1)
-
-kernel = np.ones((5,5),np.uint8)
-
-rospy.loginfo("Hello ros")
-
-bridge = CvBridge()
-
-sub_center = rospy.Subscriber("/BallCenter", Point, callbackCenter)
-
-kernel = np.ones((5,5),np.uint8)
-
-while not rospy.is_shutdown():
-    pass
+if __name__ == "__main__":
+    headctrl = HeadControl()
+    while not rospy.is_shutdown():
+        try:
+            headctrl.control()
+        except AttributeError:
+            continue
