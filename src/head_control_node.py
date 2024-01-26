@@ -12,6 +12,7 @@ from geometry_msgs.msg import Point
 import math
 import std_msgs
 from std_msgs.msg import Bool
+import time
 
 
 gradient = lambda x1,y1,x2,y2: (y2-y1)/(x2-x1)
@@ -24,8 +25,10 @@ class HeadControl:
         self.error_pub = rospy.Publisher('/error', geometry_msgs.msg.Point, queue_size=1)
         self.position_pub = rospy.Publisher('/position', geometry_msgs.msg.Point, queue_size=1)
         self.ball_pub = rospy.Publisher('/find_ball', std_msgs.msg.Bool, queue_size=1)
+        self.turnNsearch_pub = rospy.Publisher('/turnNsearch', std_msgs.msg.Bool, queue_size=1)
 
         self.find_ball = Bool()
+        self.turn_search = Bool()
 
         self.bridge = CvBridge()
 
@@ -55,6 +58,10 @@ class HeadControl:
 
         self.Tm = 0.1
         self.t = 0
+
+        self.now = 0
+        self.start_search = 0
+        self.end_search = False
 
         self.kernel = np.ones((5,5),np.uint8)
 
@@ -127,6 +134,8 @@ class HeadControl:
 
         if self.errx0 != 70 and self.erry0 != 70:
 
+            self.start_search = 0
+
             ux = ux1 + (self.kpx + self.kdx/self.Tm)*self.errx0 + (-self.kpx + self.kix*self.Tm - 2*self.kdx/self.Tm)*self.errx1 + (self.kdx/self.Tm)*self.errx2
             #ux = ux1 + (Kpx + Kdx/Tm)*errx0 + (-2*Kdx/Tm)*errx1 + (-Kpx + Kdx/Tm)*errx2
             uy = uy1 + (self.kpy + self.kdy/self.Tm)*self.erry0 + (-self.kpy + self.kiy*self.Tm - 2*self.kdy/self.Tm)*self.erry1 + (self.kdy/self.Tm)*self.erry2
@@ -173,6 +182,18 @@ class HeadControl:
             self.errx2 = 0
             self.erry2 = 0
         """else:
+            self.turn_search.data = False
+            self.turnNsearch_pub.publish(self.turn_search)
+            if not self.start_search:
+                self.start_search =  time.time()
+            if not self.end_search:
+                if (self.now - self.start_search) > 5:
+                    self.end_search = True
+            else:
+                self.turnNsearch_pub.publish(self.turn_search)
+                time.sleep(1)
+                self.start_search = 0
+            
             t += 1
 
             if (t>360):
@@ -190,7 +211,9 @@ class HeadControl:
             position_point.x = ux_noball
             position_point.y = uy_noball
 
-            position_pub.publish(position_point)"""
+            position_pub.publish(position_point)
+            
+            self.now = time.time()"""
 
 
 if __name__ == "__main__":
