@@ -191,7 +191,7 @@ class HeadControl:
                     self.end_search = True
             else:
                 self.turnNsearch_pub.publish(self.turn_search)
-                time.sleep(1)
+                time.sleep(2.5)
                 self.start_search = 0
             
             t += 1
