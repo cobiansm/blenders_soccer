@@ -33,6 +33,7 @@ class HeadControl:
         self.bridge = CvBridge()
 
         subimg = rospy.Subscriber("/usb_cam/image_raw", Image, self.center_callback)
+        sub_center = rospy.Subscriber("/BallCenter", Point, self.callbackCenter)
 
         self.ux0 = 0
         self.ux0 = 0
@@ -40,11 +41,11 @@ class HeadControl:
         self.ux1 = 0
         self.uy1 = 0
 
-        self.kpx = 0
+        self.kpx = 0.5
         self.kdx = 0
         self.kix = 0
 
-        self.kpy = 0
+        self.kpy = 0.5
         self.kdy = 0
         self.kiy = 0
 
@@ -56,12 +57,18 @@ class HeadControl:
         self.erry1 = 0
         self.erry2 = 0
 
+        self.center = Point()
+
         self.Tm = 0.1
         self.t = 0
 
         self.now = 0
         self.start_search = 0
         self.end_search = False
+
+        self.noball_start_time = 0
+        self.noball_now_time = 0
+        self.noball_end_time = False
 
         self.kernel = np.ones((5,5),np.uint8)
 
@@ -102,10 +109,18 @@ class HeadControl:
 
         final_img = self.bridge.cv2_to_imgmsg(frame, "rgb8")
         self.image_pub.publish(final_img)
+    
+    def callbackCenter(self, ball_center):
+
+        self.center.x = ball_center.x
+        self.center.y = ball_center.y
 
     def cal_err(self):
         x_center = 320
         y_center = 240
+
+        #errorx = x_center - self.center.x
+        #errory = y_center - self.center.y
 
         errorx = x_center - self.xball
         errory = y_center - self.yball
@@ -126,6 +141,8 @@ class HeadControl:
         return point
 
     def control(self):
+        self.turn_search.data = False
+        self.turnNsearch_pub.publish(self.turn_search)
 
         point = self.cal_err()
 
@@ -133,12 +150,16 @@ class HeadControl:
         self.erry0 = point.y
 
         if self.errx0 != 70 and self.erry0 != 70:
+            
+            self.noball_start_time = 0
+            self.noball_now_time = 0
+            self.noball_end_time = False
 
             self.start_search = 0
 
-            ux = ux1 + (self.kpx + self.kdx/self.Tm)*self.errx0 + (-self.kpx + self.kix*self.Tm - 2*self.kdx/self.Tm)*self.errx1 + (self.kdx/self.Tm)*self.errx2
+            ux = self.ux1 + (self.kpx + self.kdx/self.Tm)*self.errx0 + (-self.kpx + self.kix*self.Tm - 2*self.kdx/self.Tm)*self.errx1 + (self.kdx/self.Tm)*self.errx2
             #ux = ux1 + (Kpx + Kdx/Tm)*errx0 + (-2*Kdx/Tm)*errx1 + (-Kpx + Kdx/Tm)*errx2
-            uy = uy1 + (self.kpy + self.kdy/self.Tm)*self.erry0 + (-self.kpy + self.kiy*self.Tm - 2*self.kdy/self.Tm)*self.erry1 + (self.kdy/self.Tm)*self.erry2
+            uy = self.uy1 + (self.kpy + self.kdy/self.Tm)*self.erry0 + (-self.kpy + self.kiy*self.Tm - 2*self.kdy/self.Tm)*self.erry1 + (self.kdy/self.Tm)*self.erry2
             #uy = uy1 + (Kpy + Kdy/Tm)*erry0 + (-2*Kdy/Tm)*erry1 + (-Kpy + Kdy/Tm)*erry2
 
             if ux >= 70: ux = 70
@@ -147,11 +168,11 @@ class HeadControl:
             if uy >= 0: uy = -5
             elif uy <= -70: uy = -70
 
-            ux1 = ux
+            self.ux1 = ux
             self.errx1 = self.errx0
             self.errx2 = self.errx1
 
-            uy1 = uy
+            self.uy1 = uy
             self.erry2 = self.erry1
             self.erry1 = self.erry0
 
@@ -164,7 +185,7 @@ class HeadControl:
 
                 position_point = Point()
                 position_point.x = ux
-                position_point.y = uy
+                position_point.y = 0
                 position_point.z = self.area
 
                 self.position_pub.publish(position_point)
@@ -173,47 +194,69 @@ class HeadControl:
             self.ball_pub.publish(self.find_ball)
 
         else:
-            self.find_ball.data = False
-            self.ball_pub.publish(self.find_ball)
 
-            self.errx1 = 0
-            self.erry1 = 0
-
-            self.errx2 = 0
-            self.erry2 = 0
-        """else:
-            self.turn_search.data = False
-            self.turnNsearch_pub.publish(self.turn_search)
-            if not self.start_search:
+            if not self.noball_start_time:
                 self.start_search =  time.time()
-            if not self.end_search:
-                if (self.now - self.start_search) > 5:
-                    self.end_search = True
+            if not self.noball_end_time:
+                if (self.noball_now_time - self.noball_start_time) > 3:
+                    self.noball_end_time = True
+                
+                self.noball_now_time = time.time()
             else:
-                self.turnNsearch_pub.publish(self.turn_search)
-                time.sleep(2.5)
-                self.start_search = 0
-            
-            t += 1
+                #self.noball_start_time = False
+                #self.noball_end_time = False
+                #self.noball_now_time = 0
 
-            if (t>360):
-                t=-360
+                self.find_ball.data = False
+                self.ball_pub.publish(self.find_ball)
 
-            ux_noball = 70*math.sin(0.1*t) #(t/(180/3.14159))
+                self.errx1 = 0
+                self.erry1 = 0
 
-            uy_noball = 20*math.cos(0.1*t) - 20
+                self.errx2 = 0
+                self.erry2 = 0
 
-            ux_noball = (ux_noball*math.pi)/180
-            uy_noball = (uy_noball*math.pi)/180
+                """position_point = Point()
+                position_point.x = 0
+                position_point.y = 0
+                position_point.z = self.area
 
-            position_point = Point()
+                self.position_pub.publish(position_point)"""
 
-            position_point.x = ux_noball
-            position_point.y = uy_noball
+                if not self.start_search:
+                    self.start_search =  time.time()
+                if not self.end_search:
+                    self.turn_search.data = False
+                    self.turnNsearch_pub.publish(self.turn_search)
+                    if (self.now - self.start_search) > 5:
+                        self.end_search = True
+                    
+                    self.now = time.time()
+                else:
+                    self.turn_search.data = True
+                    self.turnNsearch_pub.publish(self.turn_search)
+                    time.sleep(2.0)
+                    self.start_search = False
+                    self.end_search = False
+                    self.now = 0
+                
+                """self.t += 1
 
-            position_pub.publish(position_point)
-            
-            self.now = time.time()"""
+                if (self.t>360):
+                    self.t=-360
+
+                ux_noball = 70*math.sin(0.1*self.t) #(t/(180/3.14159))
+                uy_noball = 20*math.sin(0.1*self.t) - 20
+
+                ux_noball = (ux_noball*math.pi)/180
+                uy_noball = (uy_noball*math.pi)/180
+
+                position_point = Point()
+
+                position_point.x = ux_noball
+                position_point.y = uy_noball
+
+                self.position_pub.publish(position_point)"""
 
 
 if __name__ == "__main__":
