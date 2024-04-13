@@ -12,3 +12,4 @@ if __name__ == "__main__":
             image_processor.detect_ball()
         except AttributeError:
             continue
+        
