@@ -32,7 +32,7 @@ void torqueOnAll();
 
 void goInitPose();
 void goAction(int page);
-void turn();
+void turn2search();
 void goWalk(std::string& command);
 
 bool isActionRunning();
@@ -50,10 +50,13 @@ void callbackPosition(const geometry_msgs::Point& msg);
 void callbackJointStates(const sensor_msgs::JointState& msg);
 void callbackError(const geometry_msgs::Point& msg);
 void callbackTurn(const std_msgs::Bool& msg);
+void callbackfindBall(const std_msgs::Bool& msg);
+void callbackSearchBall(const std_msgs::Bool& msg);
+
 
 double rest_inc = 0.2181;
 //rest_inc =0.2618 15°
-//double rest_inc_giro = 0.08726;
+double rest_inc_giro = 0.08726;
 
 double alpha = 0.4;
 double pitch;
@@ -68,8 +71,11 @@ double positionx;
 double positiony;
 double errorx;
 double errory;
+double distance_to_ball = 0.0;
 int page;
 int state;
+
+std_msgs::String scan;
 
 const int row = 5700;
 const int col = 14;
@@ -120,12 +126,15 @@ ros::Publisher action_pose_pub;
 ros::Publisher walk_command_pub;
 ros::Publisher set_walking_param_pub;
 ros::Publisher reset_body_pub;
+ros::Publisher scan_command;
 
 ros::Subscriber read_joint_sub;
 ros::Subscriber imu_sub;
 ros::Subscriber position_sub;
 ros::Subscriber error_sub;
+ros::Subscriber search_ball_sub;
 ros::Subscriber find_ball_sub;
+ros::Subscriber turnNsearch_sub;
 
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
@@ -137,8 +146,9 @@ op3_walking_module_msgs::WalkingParam current_walking_param;
 int control_module = None;
 bool demo_ready = false;
 
-bool find_ball = true;
+bool ball = false;
 bool turnNsearch = false;
+bool search_ball = false;
 
 //node main
 int main(int argc, char **argv)
@@ -148,16 +158,17 @@ int main(int argc, char **argv)
   ros::init(argc, argv, "read_write");
   ros::NodeHandle nh(ros::this_node::getName());
 
+  int robot_id;
+  nh.param<int>("robot_id", robot_id, 0);
+
   //subscribers
-  read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
-  position_sub = nh.subscribe("/position", 5, callbackPosition);
-  error_sub = nh.subscribe("/error", 5, callbackError);
-  //ros::Subscriber error_sub = nh.subscribe("/error", 5, callbackError);
-  //ros::Subscriber position_sub = nh.subscribe("/position", 5, callbackPosition);
-  //ros::Subscriber joint_error_sub = nh.subscribe("/robotis/present_joint_states", 5, CallBack);
-  //ros::Subscriber find_ball_sub = nh.subscribe("/find_ball", 5, findballCallBack);
-  imu_sub = nh.subscribe("/robotis/open_cr/imu", 1, callbackImu);
-  find_ball_sub = nh.subscribe("/find_ball", 5, callbackTurn);
+  read_joint_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/present_joint_states",1, callbackJointStates);
+  position_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/position", 5, callbackPosition);
+  error_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/error", 5, callbackError);
+  search_ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/search_ball", 5, callbackSearchBall);
+  imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu", 1, callbackImu);
+  find_ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/find_ball", 5, callbackfindBall);
+  turnNsearch_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/turnNsearch", 5, callbackTurn);
   
   std::string command;
   
@@ -176,22 +187,25 @@ int main(int argc, char **argv)
   } else {
   	std::cout << "El archivo no abrió";
   }
+
+
   
   //publishers
-  init_pose_pub = nh.advertise<std_msgs::String>("/robotis/base/ini_pose", 0);
-  dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis/dxl_torque", 0);
-  write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis/head_control/set_joint_states", 0);
-  write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis/set_joint_states", 0);
-  vision_case_pub = nh.advertise<std_msgs::Bool>("/vision_case", 1000);
-  action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis/action/page_num", 0);
-  walk_command_pub = nh.advertise<std_msgs::String>("/robotis/walking/command", 0);
-  set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis/walking/set_params", 0);
-  reset_body_pub = nh.advertise<std_msgs::Bool>("/robotis/online_walking/reset_body", 0);
+  init_pose_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/base/ini_pose", 0);
+  dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/dxl_torque", 0);
+  write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states", 0);
+  write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/set_joint_states", 0);
+  vision_case_pub = nh.advertise<std_msgs::Bool>("/robotis_" + std::to_string(robot_id) + "/vision_case", 1000);
+  action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis_" + std::to_string(robot_id) + "/action/page_num", 0);
+  walk_command_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/walking/command", 0);
+  set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/set_params", 0);
+  reset_body_pub = nh.advertise<std_msgs::Bool>("/robotis_" + std::to_string(robot_id) + "/online_walking/reset_body", 0);
+  scan_command = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/head_control/scan_command", 0);
 
   //services
-  set_joint_module_client = nh.serviceClient<robotis_controller_msgs::SetModule>("/robotis/set_present_ctrl_modules");
-  is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis/action/is_running");
-  get_param_client = nh.serviceClient<op3_walking_module_msgs::GetWalkingParam>("/robotis/walking/get_params");
+  set_joint_module_client = nh.serviceClient<robotis_controller_msgs::SetModule>("/robotis_" + std::to_string(robot_id) + "/set_present_ctrl_modules");
+  is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis_" + std::to_string(robot_id) + "/action/is_running");
+  get_param_client = nh.serviceClient<op3_walking_module_msgs::GetWalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/get_params");
   //get_joint_client = nh.serviceClient<op3_online_walking_module_msgs::GetJointPose>("robotis/online_walking/get_joint_pose");
 
   ros::start();
@@ -290,32 +304,67 @@ int main(int argc, char **argv)
 	ros::Duration(3.0).sleep();
   }*/
   
-  setModule("walking_module");
+  goAction(9);
   ros::Time prev_time_ = ros::Time::now();
-  
   
   while (ros::ok()){
     ros::Rate loop_rate(SPIN_RATE);
     ros::spinOnce();
 
-    if (turnNsearch){
+    /*if (ball){
       turn2search()
-    }
-        
-	  setModule("head_control_module");
+    }*/
+    
+    
+    
 
-    write_msg.name.push_back("head_pan");
-    write_msg.position.push_back(positionx);
-    write_msg.name.push_back("head_tilt");
-    write_msg.position.push_back(positiony);
-    write_head_joint_pub.publish(write_msg);
+    /*if (!ball){
+      setModule("none");
+      write_msg.name.push_back("head_pan");
+      write_msg.position.push_back(positionx);
+      write_msg.name.push_back("head_tilt");
+      write_msg.position.push_back(positiony);
+      write_joint_pub.publish(write_msg);
+    }else{
+      setModule("head_control_module");
+      write_msg.name.push_back("head_pan");
+      write_msg.position.push_back(positionx);
+      write_msg.name.push_back("head_tilt");
+      write_msg.position.push_back(positiony);
+      write_head_joint_pub.publish(write_msg);
+    }*/
+    if (!ball){
+    	setModule("head_control_module");
+      if (!search_ball){
+        write_msg.name.push_back("head_pan");
+        write_msg.position.push_back(head_pan + positionx);
+        write_msg.name.push_back("head_tilt");
+        write_msg.position.push_back(head_tilt + positiony);
+        write_head_joint_pub.publish(write_msg);
+      }else{
+        if (distance_to_ball < 0.43 && distance_to_ball != 0.0){
+          positiony -= 0.17;
+        }
+        write_msg.name.push_back("head_pan");
+        write_msg.position.push_back(positionx);
+        write_msg.name.push_back("head_tilt");
+        write_msg.position.push_back(positiony);
+        write_head_joint_pub.publish(write_msg);
+      }
+    }
+
+    if (turnNsearch){
+      turn2search();
+    }/*else{
+      std::cout << "NOOOOOOOOOOOO GIRAAAA" << std::endl;
+    }*/
     //errorx = 0;
     //errory = 0;
         
 	  setModule("walking_module");
         
-    if ((errorx > -35 && errorx < 35) && (errory > -35 && errory < 35)){
-  	
+    //if ((errorx > -8 && errorx < 8) && (errory > -8 && errory < 8) && (errorx != 0) && (errory != 0)){
+    if (ball){	
 	  	ros::Time curr_time = ros::Time::now();
       ros::Duration dur = curr_time - prev_time_;
       double delta_time = dur.nsec * 0.000000001 + dur.sec;
@@ -323,13 +372,16 @@ int main(int argc, char **argv)
 
       count_not_found_ = 0;
 
-      double distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
+      distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
 
-      if (distance_to_ball < 0)
+      if (distance_to_ball < 0){
         distance_to_ball *= (-1);
+      }
 
-      double distance_to_kick = 0.22;
+      double distance_to_kick = 0.22;  //0.22
+
       std::cout << distance_to_ball << std::endl;
+      
       if ((distance_to_ball < distance_to_kick) ){ //&& (fabs(ball_x_angle) < 25.0) to kick
         count_to_kick_ += 1;	
         std::cout << count_to_kick_ << std::endl;
@@ -401,6 +453,10 @@ void goInitPose()
 }
 
 void turn2search(){
+  //node loop
+  sensor_msgs::JointState write_msg;
+  write_msg.header.stamp = ros::Time::now();
+  
   for (int i = 1; i <= 6; i++)
   {
     setModule("none");
@@ -431,11 +487,11 @@ void turn2search(){
     //Bajar pie derecho
     ros::Duration(0.1).sleep();
     write_msg.name.push_back("r_ank_pitch");
-    write_msg.position.push_back(posiciones2[ult_pos][0]);
+    write_msg.position.push_back(posiciones2[row2-1][0]);
     write_msg.name.push_back("r_knee");
-    write_msg.position.push_back(posiciones2[ult_pos][1]);
+    write_msg.position.push_back(posiciones2[row2-1][1]);
     write_msg.name.push_back("r_hip_pitch");
-    write_msg.position.push_back(posiciones2[ult_pos][2] + rest_inc_giro);
+    write_msg.position.push_back(posiciones2[row2-1][2] + rest_inc_giro);
     write_joint_pub.publish(write_msg);
     
     //Levantar pie izquierdo
@@ -455,11 +511,11 @@ void turn2search(){
     //Bajar pie izquierdo
     ros::Duration(0.1).sleep();
     write_msg.name.push_back("l_ank_pitch");
-    write_msg.position.push_back(posiciones2[ult_pos][3]);
+    write_msg.position.push_back(posiciones2[row2-1][3]);
     write_msg.name.push_back("l_knee");
-    write_msg.position.push_back(posiciones2[ult_pos][4]);
+    write_msg.position.push_back(posiciones2[row2-1][4]);
     write_msg.name.push_back("l_hip_pitch");
-    write_msg.position.push_back(posiciones2[ult_pos][5] - rest_inc_giro);
+    write_msg.position.push_back(posiciones2[row2-1][5] - rest_inc_giro);
     write_joint_pub.publish(write_msg);
   }
 }
@@ -658,7 +714,17 @@ void callbackImu(const sensor_msgs::Imu::ConstPtr& msg)
   }
 }
 
+void callbackfindBall(const std_msgs::Bool& msg)
+{
+  ball = msg.data;
+}
+
 void callbackTurn(const std_msgs::Bool& msg)
 {
-  turnNsearch = msg.data
+  turnNsearch = msg.data;
+}
+
+void callbackSearchBall(const std_msgs::Bool& msg)
+{
+  search_ball = msg.data;
 }
