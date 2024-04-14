@@ -195,7 +195,6 @@ int main(int argc, char **argv)
   dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/dxl_torque", 0);
   write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states", 0);
   write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/set_joint_states", 0);
-  vision_case_pub = nh.advertise<std_msgs::Bool>("/robotis_" + std::to_string(robot_id) + "/vision_case", 1000);
   action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis_" + std::to_string(robot_id) + "/action/page_num", 0);
   walk_command_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/walking/command", 0);
   set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/set_params", 0);
@@ -661,7 +660,7 @@ bool getWalkingParam()
   }
   else
   {
-    ROS_ERROR("Fail to get walking parameters.");
+    ROS_ERROR("Failed to get walking parameters.");
 
     return false;
   }
