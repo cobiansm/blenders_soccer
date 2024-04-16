@@ -11,7 +11,7 @@ def check_player(obj):
 if __name__ == "__main__":
     rospy.init_node('head_control_node')
     headctrl = HC()
-    headctrl.player = rospy.get_param("player", 0)
+    headctrl.player = "Defender" #rospy.get_param("player", 0)
 
     if headctrl.player == "Goalkeeper":
         from BallPrediction import BallPrediction as BP; bp = BP()
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     while not rospy.is_shutdown():
         if headctrl.player == "Goalkeeper":
             bp.get_predictions(frame=headctrl.frame, center=headctrl.center, predict_num=4)
-        try:
-            headctrl.control()
-        except AttributeError:
-            continue
+        #try:
+        headctrl.head_control()
+        # except AttributeError:
+        #     continue

@@ -6,6 +6,7 @@
 #include <thread>
 
 #include <ros/ros.h>
+#include <cmath>
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/Int32.h>
@@ -45,6 +46,9 @@ void setWalkingParam(double x_move, double y_move, double rotation_angle, bool b
 bool processFollowing();
 void waitFollowing();
 
+double complementaryFilter(double yaw, double gyro_z, double accel_yaw);
+double euler_from_quaternion(double x, double y, double z, double w);
+
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg);
 void callbackPosition(const geometry_msgs::Point& msg);
 void callbackJointStates(const sensor_msgs::JointState& msg);
@@ -60,6 +64,7 @@ double rest_inc_giro = 0.08726;
 
 double alpha = 0.4;
 double pitch;
+double compass_yaw = 0.0;
 
 double rpy_orientation;
 const double FALL_FORWARD_LIMIT = 55;
@@ -139,7 +144,6 @@ ros::Subscriber turnNsearch_sub;
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
 ros::ServiceClient get_param_client;
-//ros::ServiceClient get_joint_client;
 
 op3_walking_module_msgs::WalkingParam current_walking_param;
 
@@ -149,6 +153,16 @@ bool demo_ready = false;
 bool ball = false;
 bool turnNsearch = false;
 bool search_ball = false;
+
+// Complementary filter
+double omega = 0.95;  // Complementary filter constant
+double dt = 0.01;     // Time interval between sensor readings (in seconds)
+
+// Initial yaw estimate
+double yaw = 0.0;
+double old_yaw = 0.0;
+double drift = 0.0;
+double beta = 2*M_PI;
 
 //node main
 int main(int argc, char **argv)
@@ -162,50 +176,31 @@ int main(int argc, char **argv)
   nh.param<int>("robot_id", robot_id, 0);
 
   //subscribers
-  read_joint_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/present_joint_states",1, callbackJointStates);
-  position_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/position", 5, callbackPosition);
-  error_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/error", 5, callbackError);
-  search_ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/search_ball", 5, callbackSearchBall);
-  imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu", 1, callbackImu);
-  find_ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/find_ball", 5, callbackfindBall);
-  turnNsearch_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/turnNsearch", 5, callbackTurn);
+  read_joint_sub = nh.subscribe("/present_joint_states",1, callbackJointStates);
+  position_sub = nh.subscribe("/position", 5, callbackPosition);
+  error_sub = nh.subscribe("/error", 5, callbackError);
+  search_ball_sub = nh.subscribe("/search_ball", 5, callbackSearchBall);
+  imu_sub = nh.subscribe("/robotis/open_cr/imu", 1, callbackImu);
+  find_ball_sub = nh.subscribe("/find_ball", 5, callbackfindBall);
+  turnNsearch_sub = nh.subscribe("/turnNsearch", 5, callbackTurn);
   
   std::string command;
   
-  std::ifstream myfile ("/home/robotis/blenders_ws/src/soccer_pkg/data/Pararse.txt");
-  if (myfile.is_open())
-  {
-	std::cout << "El archivo se abrió";
-	
-		for (int idx2 = 0; idx2 < row2; idx2++){
-			for (int idy2 = 0; idy2 < col2; idy2++){
-				myfile >> posiciones2[idx2][idy2];
-			}
-			
-		}
-		myfile.close();
-  } else {
-  	std::cout << "El archivo no abrió";
-  }
-
-
-  
   //publishers
-  init_pose_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/base/ini_pose", 0);
-  dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/dxl_torque", 0);
-  write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states", 0);
-  write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/set_joint_states", 0);
-  action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis_" + std::to_string(robot_id) + "/action/page_num", 0);
-  walk_command_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/walking/command", 0);
-  set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/set_params", 0);
-  reset_body_pub = nh.advertise<std_msgs::Bool>("/robotis_" + std::to_string(robot_id) + "/online_walking/reset_body", 0);
-  scan_command = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/head_control/scan_command", 0);
+  init_pose_pub = nh.advertise<std_msgs::String>("/robotis/base/ini_pose", 0);
+  dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis/dxl_torque", 0);
+  write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis/head_control/set_joint_states", 0);
+  write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis/set_joint_states", 0);
+  action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis/action/page_num", 0);
+  walk_command_pub = nh.advertise<std_msgs::String>("/robotis/walking/command", 0);
+  set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis/walking/set_params", 0);
+  reset_body_pub = nh.advertise<std_msgs::Bool>("/robotis/online_walking/reset_body", 0);
+  scan_command = nh.advertise<std_msgs::String>("/robotis/head_control/scan_command", 0);
 
   //services
-  set_joint_module_client = nh.serviceClient<robotis_controller_msgs::SetModule>("/robotis_" + std::to_string(robot_id) + "/set_present_ctrl_modules");
-  is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis_" + std::to_string(robot_id) + "/action/is_running");
-  get_param_client = nh.serviceClient<op3_walking_module_msgs::GetWalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/get_params");
-  //get_joint_client = nh.serviceClient<op3_online_walking_module_msgs::GetJointPose>("robotis/online_walking/get_joint_pose");
+  set_joint_module_client = nh.serviceClient<robotis_controller_msgs::SetModule>("/robotis/set_present_ctrl_modules");
+  is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis/action/is_running");
+  get_param_client = nh.serviceClient<op3_walking_module_msgs::GetWalkingParam>("/robotis/walking/get_params");
 
   ros::start();
 
@@ -236,46 +231,7 @@ int main(int argc, char **argv)
   ros::Duration(1).sleep();
   ros::Rate loop_rate_pararse(60);
   
-  /*for (int fila2=0; fila2<row2; fila2++)
-  {
-    write_msg.name.push_back("r_ank_pitch");
-    write_msg.position.push_back(posiciones2[fila2][0]);
-    write_msg.name.push_back("r_knee");
-    write_msg.position.push_back(posiciones2[fila2][1]);
-    write_msg.name.push_back("r_hip_pitch");
-    write_msg.position.push_back(posiciones2[fila2][2] + rest_inc);
-    write_msg.name.push_back("l_ank_pitch");
-    write_msg.position.push_back(posiciones2[fila2][3]);
-    write_msg.name.push_back("l_knee");
-    write_msg.position.push_back(posiciones2[fila2][4]);
-    write_msg.name.push_back("l_hip_pitch");
-    write_msg.position.push_back(posiciones2[fila2][5] - rest_inc);
-    write_joint_pub.publish(write_msg);
-      
-    loop_rate_pararse.sleep();
-  }
-  
- //////////////////////////////////////////////// acomodo de pies ////////////////////////////////////////////////
-  ros::Duration(1).sleep();
-  write_msg.name.push_back("l_hip_yaw");
-  write_msg.position.push_back(-0.0873);
-  write_msg.name.push_back("r_hip_yaw");
-  write_msg.position.push_back(0.0873);
-  write_joint_pub.publish(write_msg);
-    
-  ros::Duration(1).sleep();
-  write_msg.name.push_back("l_hip_roll");
-  write_msg.position.push_back(-0.0873);
-  write_msg.name.push_back("r_hip_roll");
-  write_msg.position.push_back(0.0873);
-  write_msg.name.push_back("l_ank_roll");
-  write_msg.position.push_back(-0.0873);
-  write_msg.name.push_back("r_ank_roll");
-  write_msg.position.push_back(0.0873);
-  write_joint_pub.publish(write_msg);
-
- //////////////////////////////////////////////// loop ////////////////////////////////////////////////
-
+ 
   while (ros::ok())
   {
 	ros::spinOnce();
@@ -283,150 +239,25 @@ int main(int argc, char **argv)
 	
 	setModule("head_control_module");
 
-        write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(positionx);
-        write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(positiony);
-        write_head_joint_pub.publish(write_msg);
+    write_msg.name.push_back("head_pan");
+    write_msg.position.push_back(positionx);
+    write_msg.name.push_back("head_tilt");
+    write_msg.position.push_back(positiony);
+    write_head_joint_pub.publish(write_msg);
 
-	//std::string command = "start";
-	//goWalk(command);
-	/*getWalkingParam();
-	setWalkingParam(0.02, 0, -0.0872664600611, true);
-	std_msgs::String command_msg;
-	command_msg.data = "start";
-	walk_command_pub.publish(command_msg);
 	
-	ros::Duration(3.0).sleep();
-	command = "stop";
-	goWalk(command);
-	ros::Duration(3.0).sleep();
-  }*/
   
-  goAction(9);
-  ros::Time prev_time_ = ros::Time::now();
+    goAction(9);
+    ros::Time prev_time_ = ros::Time::now();
   
   while (ros::ok()){
     ros::Rate loop_rate(SPIN_RATE);
     ros::spinOnce();
 
-    /*if (ball){
-      turn2search()
-    }*/
-    
-    
-    
-
-    /*if (!ball){
-      setModule("none");
-      write_msg.name.push_back("head_pan");
-      write_msg.position.push_back(positionx);
-      write_msg.name.push_back("head_tilt");
-      write_msg.position.push_back(positiony);
-      write_joint_pub.publish(write_msg);
-    }else{
-      setModule("head_control_module");
-      write_msg.name.push_back("head_pan");
-      write_msg.position.push_back(positionx);
-      write_msg.name.push_back("head_tilt");
-      write_msg.position.push_back(positiony);
-      write_head_joint_pub.publish(write_msg);
-    }*/
-    if (!ball){
-    	setModule("head_control_module");
-      if (!search_ball){
-        write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(head_pan + positionx);
-        write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(head_tilt + positiony);
-        write_head_joint_pub.publish(write_msg);
-      }else{
-        if (distance_to_ball < 0.43 && distance_to_ball != 0.0){
-          positiony -= 0.17;
-        }
-        write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(positionx);
-        write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(positiony);
-        write_head_joint_pub.publish(write_msg);
-      }
-    }
-
-    if (turnNsearch){
-      turn2search();
-    }/*else{
-      std::cout << "NOOOOOOOOOOOO GIRAAAA" << std::endl;
-    }*/
-    //errorx = 0;
-    //errory = 0;
-        
-	  setModule("walking_module");
-        
-    //if ((errorx > -8 && errorx < 8) && (errory > -8 && errory < 8) && (errorx != 0) && (errory != 0)){
-    if (ball){	
-	  	ros::Time curr_time = ros::Time::now();
-      ros::Duration dur = curr_time - prev_time_;
-      double delta_time = dur.nsec * 0.000000001 + dur.sec;
-      prev_time_ = curr_time;
-
-      count_not_found_ = 0;
-
-      distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
-
-      if (distance_to_ball < 0){
-        distance_to_ball *= (-1);
-      }
-
-      double distance_to_kick = 0.22;  //0.22
-
-      std::cout << distance_to_ball << std::endl;
-      
-      if ((distance_to_ball < distance_to_kick) ){ //&& (fabs(ball_x_angle) < 25.0) to kick
-        count_to_kick_ += 1;	
-        std::cout << count_to_kick_ << std::endl;
-        if (count_to_kick_ > 20){
-          std::string command = "stop";
-          goWalk(command);
-          if (head_pan > 0){ //left
-            std::cout << "PATEA DERECHA" << std::endl;
-            goAction(84); //left kick
-          }
-          else{ //right
-            std::cout << "PATEA IZQUIERDA" << std::endl;
-            goAction(83); //right kick
-          }
-        }
-        else if (count_to_kick_ > 15){
-          getWalkingParam();
-          setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
-
-          std_msgs::String command_msg;
-          command_msg.data = "start";
-          walk_command_pub.publish(command_msg);
-        }
-      }else{
-        count_to_kick_ = 0;
-      }
-
-      double fb_move = 0.0, rl_angle = 0.0;
-      double distance_to_walk = distance_to_ball - distance_to_kick;
-
-      calcFootstep(distance_to_walk, head_pan, delta_time, fb_move, rl_angle);
-
-      getWalkingParam();
-      setWalkingParam(fb_move, 0, rl_angle, true);
-      
-      std_msgs::String command_msg;
-      command_msg.data = "start";
-      walk_command_pub.publish(command_msg);
-		}else{
-		  std::string command = "stop";
-		  goWalk(command);
-	    ros::Duration(1.5).sleep();
-		}
-	}
+  }}
+   
 	return 0;
-}
+  }
 
 void readyToDemo()
 {
@@ -660,10 +491,31 @@ bool getWalkingParam()
   }
   else
   {
-    ROS_ERROR("Failed to get walking parameters.");
+    ROS_ERROR("Fail to get walking parameters.");
 
     return false;
   }
+}
+
+double complementaryFilter(double gyro_z, double accel_yaw)
+{
+    compass_yaw += omega * (gyro_z * dt) + (1.0 - omega) * accel_yaw + 0.0003069;
+
+    if(-beta > compass_yaw or compass_yaw > beta){
+        compass_yaw = 0.0;      
+    }
+
+    return yaw; 
+
+}
+
+double euler_from_quaternion(double x, double y, double z, double w)
+{
+    double t1 = 2.0 * (w * z + x * y);
+    double t2 = 1.0 - 2.0 * (y * y + z * z);
+    double yaw_z = atan2(t1, t2);
+
+    return yaw_z;
 }
 
 void callbackJointStates(const sensor_msgs::JointState& msg)
@@ -690,8 +542,24 @@ void callbackImu(const sensor_msgs::Imu::ConstPtr& msg)
   Eigen::Quaterniond orientation(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
   Eigen::MatrixXd rpy_orientation = robotis_framework::convertQuaternionToRPY(orientation);
   rpy_orientation *= (180 / 3.141516);
-
+  double w = msg->orientation.w;
+  double x = msg->orientation.x;
+  double y = msg->orientation.y;
+  double z = msg->orientation.z;
   double pitch = rpy_orientation.coeff(1, 0);
+  
+
+  double gyro_z = msg->angular_velocity.z;
+
+  double yaw_acc = euler_from_quaternion(x, y, z, w);
+
+  // Update yaw estimate using complementary filter
+  compass_yaw = complementaryFilter(gyro_z, yaw_acc);
+
+  //Print current yaw estimate
+  //ROS_INFO("Yaw: ", yaw*= (180 / 3.141516), " degrees");
+  std::cout << "Yaw: " << std::to_string(compass_yaw*= (180 / 3.141516)) << " degrees"<< std::endl;
+
 
   double alpha = 0.4;
   if (present_pitch_ == 0) 
