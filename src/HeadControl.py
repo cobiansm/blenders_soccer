@@ -8,9 +8,9 @@ from geometry_msgs.msg import Point
 from std_msgs.msg import Bool
 from BallDetection import BallDetection
 
-class HeadControl(BallDetection):
+class HeadControl():
     def __init__(self):
-        super(HeadControl, self).__init__()
+        #super(HeadControl, self).__init__()
         self.robot_id = rospy.get_param('robot_id', 0)
         self.error_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/error', Point, queue_size=1)
         self.position_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/position', Point, queue_size=1)
@@ -18,7 +18,7 @@ class HeadControl(BallDetection):
         self.ball_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/find_ball', Bool, queue_size=1)
         self.turnNsearch_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/turnNsearch', Bool, queue_size=1)
 
-        #sub_center = rospy.Subscriber("/BallCenter", Point, self.callbackCenter)
+        sub_center = rospy.Subscriber('/robotis_' + str(self.robot_id) + '/BallCenter', Point, self.callbackCenter)
 
         self.find_ball = Bool()
         self.search_ball = Bool()
@@ -57,27 +57,34 @@ class HeadControl(BallDetection):
         self.player = None
 
         self._players_list = ["Goalkeeper","Defender","Midfielder","Forward"]
-        
+    
+
+    def callbackCenter(self, ball_center):
+        self.center.x = ball_center.x
+        self.center.y = ball_center.y
+    
     
     def head_control(self):
         self.turn_search.data = False
         self.turnNsearch_pub.publish(self.turn_search)
 
         point = self._calc_err()
-        
-        self.find_ball.data = self._is_ball_in_img(point)
-
-        if point == None:
+        #print(self.center)
+        #print(point)
+        self.find_ball.data = self._is_ball_in_img()
+        #print(point is None, self.find_ball.data)
+        if point is None:
+            #print("no point")
             self._search_for_ball()
-            
-        elif not self.find_ball.data:
-
+        elif self.find_ball.data:
+            #print("center ball")
             self._center_ball(point)
 
 
     def _calc_err(self):
         x_center = 320
         y_center = 240
+        print(self.center)
 
         if self.center.x != 999 and self.center.y != 999 and self.center.x != None and self.center.y != None:
             errorx = x_center - self.center.x
@@ -97,11 +104,15 @@ class HeadControl(BallDetection):
             return None
 
 
-    def _is_ball_in_img(self, point):
+    def _is_ball_in_img(self):
+        # return (
+        #     (self.errx0 < -35 or self.errx0 > 35)
+        #     or (self.erry0 < -35 or self.erry0 > 35)
+        #     or point is None
+        # )
         return (
-            (self.errx0 < -35 or self.errx0 > 35)
-            or (self.erry0 < -35 or self.erry0 > 35)
-            or point is None
+            (self.errx0 > -35 and self.errx0 < 35)
+            or (self.erry0 > -35 and self.erry0 > 35)
         )
     
 
