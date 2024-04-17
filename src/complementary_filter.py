@@ -1,16 +1,18 @@
 #!/usr/bin/env python2.7
 
 import rospy
-from sensor_msgs.msg import Imu
 import numpy as np
 import math
+from sensor_msgs.msg import Imu
+from std_msgs.msg import Float64
 
 # Constants
 alpha = 0.95  # Complementary filter constant
 dt = 0.01     # Time interval between sensor readings (in seconds)
 
 # Initial yaw estimate
-yaw = 0.0
+yaw = Float64()
+yaw.data = 0.0
 old_yaw = 0.0
 drift = 0.0
 betha = 2*math.pi
@@ -37,29 +39,11 @@ def imu_callback(imu_msg):
     _, _, yaw_acc = euler_from_quaternion(q.x, q.y, q.z, q.w)
 
     # Update yaw estimate using complementary filter
-    yaw = complementary_filter(yaw, gyro_z, yaw_acc)
+    yaw.data = complementary_filter(yaw.data, gyro_z, yaw_acc)
+    pub_yaw.publish(yaw)
 
     # Print current yaw estimate
-    rospy.loginfo("Yaw: %.5f degrees", np.degrees(yaw))
-
-"""
-def imu_callback(imu_msg):
-    global yaw
-    # Extract angular velocity around z-axis (yaw rate)
-    gyro_z = imu_msg.angular_velocity.z
-
-    # Extract linear acceleration along x and y axes
-    accel_x = imu_msg.linear_acceleration.x
-    accel_y = imu_msg.linear_acceleration.y
-
-    # Calculate yaw angle from accelerometer readings
-    accel_yaw = np.arctan2(accel_y, accel_x)
-
-    # Update yaw estimate using complementary filter
-    yaw = complementary_filter(yaw, gyro_z, accel_yaw)
-
-    # Print current yaw estimate
-    print("Yaw: %.2f degrees", np.degrees(yaw))"""
+    rospy.loginfo("Yaw: %.5f degrees", np.degrees(yaw.data))
 
 def euler_from_quaternion(x, y, z, w):
     """
@@ -81,11 +65,13 @@ def euler_from_quaternion(x, y, z, w):
     return roll_x, pitch_y, yaw_z
 
 def imu_listener():
-    rospy.init_node('imu_listener', anonymous=True)
-    rospy.Subscriber('robotis_1/open_cr/imu', Imu, imu_callback)
     rospy.spin()
 
 if __name__ == '__main__':
+    rospy.init_node('imu_listener', anonymous=True)
+    rospy.Subscriber('robotis_1/open_cr/imu', Imu, imu_callback)
+    pub_yaw = rospy.Publisher('/Yaw', Float64, queue_size=1)
+
     try:
         imu_listener()
     except rospy.ROSInterruptException:

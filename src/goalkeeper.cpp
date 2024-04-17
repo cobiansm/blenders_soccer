@@ -18,7 +18,6 @@
 #include <fstream>
 #include <eigen3/Eigen/Eigen>
 
-
 #include "robotis_controller_msgs/SetModule.h"
 #include "robotis_controller_msgs/SyncWriteItem.h"
 #include "robotis_math/robotis_linear_algebra.h"
@@ -54,7 +53,8 @@ void callbackError(const geometry_msgs::Point& msg);
 void callbackTurn(const std_msgs::Bool& msg);
 void callbackfindBall(const std_msgs::Bool& msg);
 void callbackSearchBall(const std_msgs::Bool& msg);
-
+void callbackBall(const geometry_msgs::Point& msg);
+void callbackSlope(const std_msgs::Float64& msg);
 
 double rest_inc = 0.2181;
 //rest_inc =0.2618 15°
@@ -73,9 +73,13 @@ double positionx;
 double positiony;
 double errorx;
 double errory;
+double ball_area;
+double ball_slope;
 double distance_to_ball = 0.0;
 int page;
 int state;
+bool right_jump;
+bool left_jump;
 
 std_msgs::String scan;
 
@@ -167,6 +171,8 @@ int main(int argc, char **argv)
   position_sub = nh.subscribe("/position", 5, callbackPosition);
   error_sub = nh.subscribe("/error", 5, callbackError);
   search_ball_sub = nh.subscribe("/search_ball", 5, callbackSearchBall);
+  ball_sub = nh.subscribe("/BallCenter", 1, callbackBall);
+  slope_sub = nh.subscribe("/Slope", 1, callbackSlope);
   imu_sub = nh.subscribe("/robotis/open_cr/imu", 1, callbackImu);
   find_ball_sub = nh.subscribe("/find_ball", 5, callbackfindBall);
   turnNsearch_sub = nh.subscribe("/turnNsearch", 5, callbackTurn);
@@ -216,112 +222,85 @@ int main(int argc, char **argv)
   
   //pararse en posición para caminar
   ros::Duration(1).sleep();
-
-  goAction(9);
-  ros::Duration(2.0).sleep();
-  ros::Time prev_time_ = ros::Time::now();
-
+  ros::Rate loop_rate_pararse(60);
+  
+ 
   while (ros::ok())
   {
-    ros::Rate loop_rate(SPIN_RATE);
+    std::cout  << "ball area: " << ball_area << std::endl;
     ros::spinOnce();
+    ros::Rate loop_rate(SPIN_RATE);
+    
+    setModule("head_control_module");
 
-    if (!ball){
-    	setModule("head_control_module");
-      if (!search_ball){
-        write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(head_pan + positionx);
-        write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(head_tilt + positiony);
-        write_head_joint_pub.publish(write_msg);
+    write_msg.name.push_back("head_pan");
+    write_msg.position.push_back(positionx);
+    write_msg.name.push_back("head_tilt");
+    write_msg.position.push_back(positiony);
+    write_head_joint_pub.publish(write_msg);
+
+    goAction(9);
+    ros::Time prev_time_ = ros::Ti   ros::spinOnce();
+    ros::Rate loop_rate(SPIN_RATE);
+    
+    setme::now();
+
+    if ball_area > 500{
+      if head_pan > 0.5235987 && fabs(ball_slope) > 30{
+        std::cout  << "Saltar derecha" << std::endl;
+        right_jump = true
+        left_jump = false
+      }else if head_pan < -0.5235987 && fabs(ball_slope) > 30{
+        std::cout  << "Saltar izquierda" << std::endl;
+        right_jump = false
+        left_jump = true
       }else{
-        if (distance_to_ball < 0.43 && distance_to_ball != 0.0){
-          positiony -= 0.17;
+        if ball_slope < -30{  //30°
+          std::cout  << "Saltar derecha" << std::endl;
+          right_jump = true
+          left_jump = false
+        }else if ball_slope > 30{
+          std::cout  << "Saltar izquierda" << std::endl;
+          right_jump = false
+          left_jump = true
         }
-        write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(positionx);
-        write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(positiony);
-        write_head_joint_pub.publish(write_msg);
       }
+    }else{
+      right_jump = false
+      left_jump = false
     }
-
-    if (turnNsearch){
-      turn2search();
-    }/*else{
-      std::cout << "NOOOOOOOOOOOO GIRAAAA" << std::endl;
+      
+    /*if (30<yaw<-30){
+      goAction(60);
+      ros::Duration(10).sleep();
+    }else{
+      while(yaw>30 or yaw<-30){
+        turn2search();
+      }
     }*/
-    //errorx = 0;
-    //errory = 0;
-        
-	  setModule("walking_module");
-        
-    //if ((errorx > -8 && errorx < 8) && (errory > -8 && errory < 8) && (errorx != 0) && (errory != 0)){
-    if (ball){	
-	  	ros::Time curr_time = ros::Time::now();
-      ros::Duration dur = curr_time - prev_time_;
-      double delta_time = dur.nsec * 0.000000001 + dur.sec;
-      prev_time_ = curr_time;
 
-      count_not_found_ = 0;
-
-      distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
-
-      if (distance_to_ball < 0){
-        distance_to_ball *= (-1);
-      }
-
-      double distance_to_kick = 0.22;  //0.22
-
-      std::cout << distance_to_ball << std::endl;
-      
-      if ((distance_to_ball < distance_to_kick) ){ //&& (fabs(ball_x_angle) < 25.0) to kick
-        count_to_kick_ += 1;	
-        std::cout << count_to_kick_ << std::endl;
-        if (count_to_kick_ > 20){
-          std::string command = "stop";
-          goWalk(command);
-          if (head_pan > 0){ //left
-            std::cout << "PATEA DERECHA" << std::endl;
-            goAction(84); //left kick
-          }
-          else{ //right
-            std::cout << "PATEA IZQUIERDA" << std::endl;
-            goAction(83); //right kick
-          }
-        }
-        else if (count_to_kick_ > 15){
-          getWalkingParam();
-          setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
-
-          std_msgs::String command_msg;
-          command_msg.data = "start";
-          walk_command_pub.publish(command_msg);
-        }
-      }else{
-        count_to_kick_ = 0;
-      }
-
-      double fb_move = 0.0, rl_angle = 0.0;
-      double distance_to_walk = distance_to_ball - distance_to_kick;
-
-      calcFootstep(distance_to_walk, head_pan, delta_time, fb_move, rl_angle);
-
-      getWalkingParam();
-      setWalkingParam(fb_move, 0, rl_angle, true);
-      
-      std_msgs::String command_msg;
-      command_msg.data = "start";
-      walk_command_pub.publish(command_msg);
-		}else{
-		  std::string command = "stop";
-		  goWalk(command);
-	    ros::Duration(1.5).sleep();
-		}
-	}
-   
-	return 0;
+    /*if(right_jump) {
+      goaction(61);
+      ros::Duration(4.0).sleep();
+      setModule("none");
+      write_msg.name.push_back("r_hip_pitch");
+      write_msg.postion.push_back(0.175);
+      write_msg.name.push_back("r_knee");
+      write_msg.postion.push_back(0.175);
+      write_joint_pub.publish(write_msg);
+    }else if(left_jump){
+      goaction(62);
+      ros::Duration(4.0).sleep();
+      setModule("none");       
+      write_msg.name.push_back("l_hip_pitch");
+      write_msg.postion.push_back(-0.175);
+      write_msg.name.push_back("l_knee");
+      write_msg.postion.push_back(-0.175);
+      write_joint_pub.publish(write_msg);
+    }*/
   }
+	return 0;
+}
 
 void readyToDemo()
 {
@@ -351,7 +330,7 @@ void turn2search(){
   sensor_msgs::JointState write_msg;
   write_msg.header.stamp = ros::Time::now();
   
-  for (int i = 1; i <= 6; i++)
+  for (int i = 1; i <= 3; i++)
   {
     setModule("none");
     std::cout  << "Derechaaaa D:" << std::endl;
@@ -580,14 +559,33 @@ void callbackError(const geometry_msgs::Point& msg)
   errory = msg.y;
 }
 
+
+void callbackBall(const geometry_msgs::Point& msg){
+  ball_area = msg.z;
+}
+
+void callbackSlope(const std_msgs::Float64& msg){
+  ball_slope = msg.data
+}
+
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) 
 {
   Eigen::Quaterniond orientation(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
   Eigen::MatrixXd rpy_orientation = robotis_framework::convertQuaternionToRPY(orientation);
   rpy_orientation *= (180 / 3.141516);
-  
+  double w = msg->orientation.w;
+  double x = msg->orientation.x;
+  double y = msg->orientation.y;
+  double z = msg->orientation.z;
   double pitch = rpy_orientation.coeff(1, 0);
 
+  double t3 = 2.0 * (w * z + x * y);
+  double t4 = 1.0 - 2.0 * (y * y + z * z);
+  double yaw_z = atan2(2.0*(y*z + w*x), w*w - x*x - y*y + z*z); //atan2(t3, t4);
+  yaw_z *= (180 / 3.141516);
+  std::cout << yaw_z << std::endl;
+
+  double alpha = 0.4;
   if (present_pitch_ == 0) 
     present_pitch_ = pitch;
   else

@@ -2,27 +2,21 @@
 #coding=utf-8
 
 import rospy
-import sensor_msgs
-import numpy as np
-from sensor_msgs.msg import Image
-import geometry_msgs
-from geometry_msgs.msg import Point
 import math
-import std_msgs
-from std_msgs.msg import Bool
 import time
+from geometry_msgs.msg import Point
+from std_msgs.msg import Bool
 
 class HeadControl:
     def __init__(self):
         rospy.init_node('PD_Head_Control')
-        self.robot_id = rospy.get_param('robot_id', 0)
-        self.error_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/error', Point, queue_size=1)
-        self.position_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/position', Point, queue_size=1)
-        self.search_ball_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/search_ball', Bool, queue_size=1)
-        self.ball_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/find_ball', Bool, queue_size=1)
-        self.turnNsearch_pub = rospy.Publisher('/robotis_' + str(self.robot_id) + '/turnNsearch', Bool, queue_size=1)
+        self.error_pub = rospy.Publisher('/error', Point, queue_size=1)
+        self.position_pub = rospy.Publisher('/position', Point, queue_size=1)
+        self.search_ball_pub = rospy.Publisher('/search_ball', Bool, queue_size=1)
+        self.ball_pub = rospy.Publisher('/find_ball', Bool, queue_size=1)
+        self.turnNsearch_pub = rospy.Publisher('/turnNsearch', Bool, queue_size=1)
 
-        sub_center = rospy.Subscriber('/robotis_' + str(self.robot_id) + '/BallCenter', Point, self.callbackCenter)
+        sub_center = rospy.Subscriber('/BallCenter', Point, self.callbackCenter)
 
         self.find_ball = Bool()
         self.search_ball = Bool()

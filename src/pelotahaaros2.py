@@ -1,17 +1,15 @@
 #!/usr/bin/env python2.7
 
 import rospy
-import sensor_msgs
 import numpy as np
-from sensor_msgs.msg import Image
+import math
 import cv2
+from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import Point
-import math
-import std_msgs
-from std_msgs.msg import Bool
 from std_msgs.msg import Float64
-import os
+
+get_distance = lambda p1, p2: math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
 
 def angleCallback(angle_msg):
     global half_boolean
@@ -23,6 +21,8 @@ def angleCallback(angle_msg):
         half_boolean=False
 
 def imageCallback(img_msg):
+    global center, old_center
+
     rospy.loginfo(img_msg.header)
 
     try:
@@ -33,13 +33,18 @@ def imageCallback(img_msg):
     # continue
 
     img, center = ball_detect(frame)  ##como le meto mi imagen y saco lo de cv2
-    img = get_predictions(img, center)
+    if center.x != None and center.y != None and get_distance(center, old_center) > 100:
+        print(center.x, center.y)
+        img, slope.data = get_predictions(img, center)
+    
+    old_center.x = center.x; old_center.y = center.y
 
     final_img = bridge.cv2_to_imgmsg(img, "rgb8")
     # mask_img = bridge.cv2_to_imgmsg(dummy_mask)
     # frame_img = bridge.cv2_to_imgmsg(frame, "rgb8") # Si es imagen binaria, quitar "rgb8"
 
-    pub_final.publish(final_img)
+    pub_slope.publish(slope)
+    pub_img.publish(final_img)
     # pub_mask.publish(mask_img)
     # pub_frame.publish(frame_img)
 
@@ -69,10 +74,12 @@ def ball_detect(frame):
     if len(ball)>0:
         x,y,w,h = ball[0]
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        cx = int((x + (x + w)) / 2)
-        cy = int((y + (y + h)) / 2)
+        cx = int((x + (x + w))/ 2)
+        cy = int((y + (y + h))/ 2)
+        a = w * h
         center.x = cx
         center.y = cy
+        center.z = a
         cv2.circle(frame, (cx, cy), radius=5, color=(0, 255, 0), thickness=1)
         pub_center.publish(center)
     else:
@@ -101,10 +108,11 @@ def get_predictions(frame, center, predict_num=4):
         # draw infinite line
         cv2.line(frame, (0, int(b)), (1280, int((slope * 1280) + b)), color=(255,255,255), thickness=2)
         cv2.line(frame, (first_prediction[0], first_prediction[1]), (first_prediction[0],prediction[1]), color=(255,255,255), thickness=2)
+        
+        return frame, slope
     except:
             pass
     
-    return frame
 
 def _predict(value):
     global kalman
@@ -114,9 +122,14 @@ def _predict(value):
 
 
 if __name__ == "__main__":
+    bridge = CvBridge()
+    slope = Float64()
+    center = Point()
+    old_center = Point()
     half_boolean = None
 
-
+    old_center.x = 0.0
+    old_center.y = 0.0
     n_states = 4
     n_measures = 2
     kalman = cv2.KalmanFilter(n_states, n_measures)
@@ -126,20 +139,16 @@ if __name__ == "__main__":
 
 
     rospy.init_node('image')
-    robot_id = rospy.get_param('robot_id', 0)
-    pub_final = rospy.Publisher('/robotis_' + str(robot_id) + '/ImgFinal', Image, queue_size=1)
-    pub_center = rospy.Publisher('/robotis_' + str(robot_id) + '/BallCenter', Point, queue_size=1)
+    pub_img = rospy.Publisher('/ImgFinal', Image, queue_size=1)
+    pub_center = rospy.Publisher('/BallCenter', Point, queue_size=1)
+    pub_slope = rospy.Publisher('/Slope', Float64, queue_size=1)
     #self.subimg = rospy.Subscriber("/robotis_" + str(self.robot_id) +"/usb_cam/image_raw", Image, self.image_callback)
 
     rospy.loginfo("Hello ros")
 
-    bridge = CvBridge()
-
     subimg = rospy.Subscriber("/usb_cam/image_raw", Image, imageCallback)
     #subscriptor del angulo de la cabeza
     subangle_head = rospy.Subscriber("robotis_0/present_joint_states",Float64, angleCallback)
-
-    center = Point()
 
     while not rospy.is_shutdown():
         pass
