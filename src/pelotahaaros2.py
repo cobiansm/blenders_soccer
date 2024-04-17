@@ -5,6 +5,7 @@ import numpy as np
 import math
 import cv2
 from sensor_msgs.msg import Image
+from sensor_msgs.msg import JointState
 from cv_bridge import CvBridge, CvBridgeError
 from geometry_msgs.msg import Point
 from std_msgs.msg import Float64
@@ -13,7 +14,7 @@ get_distance = lambda p1, p2: math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
 
 def angleCallback(angle_msg):
     global half_boolean
-    rospy.loginfo(angle_msg.position)
+    #rospy.loginfo(angle_msg.position)
     angle_msg=angle_msg.position[1]
     if angle_msg<-0.7:
         half_boolean=True
@@ -139,16 +140,17 @@ if __name__ == "__main__":
 
 
     rospy.init_node('image')
-    pub_img = rospy.Publisher('/ImgFinal', Image, queue_size=1)
-    pub_center = rospy.Publisher('/BallCenter', Point, queue_size=1)
-    pub_slope = rospy.Publisher('/Slope', Float64, queue_size=1)
+    robot_id = rospy.get_param('robot_id', 0)
+    pub_img = rospy.Publisher('robotis_' + str(robot_id) + '/ImgFinal', Image, queue_size=1)
+    pub_center = rospy.Publisher('robotis_' + str(robot_id) + '/BallCenter', Point, queue_size=1)
+    pub_slope = rospy.Publisher('robotis_' + str(robot_id) + '/Slope', Float64, queue_size=1)
     #self.subimg = rospy.Subscriber("/robotis_" + str(self.robot_id) +"/usb_cam/image_raw", Image, self.image_callback)
 
     rospy.loginfo("Hello ros")
 
     subimg = rospy.Subscriber("/usb_cam/image_raw", Image, imageCallback)
     #subscriptor del angulo de la cabeza
-    subangle_head = rospy.Subscriber("robotis_0/present_joint_states",Float64, angleCallback)
+    subangle_head = rospy.Subscriber('robotis_' + str(robot_id) + '/present_joint_states',JointState, angleCallback)
 
     while not rospy.is_shutdown():
         pass
