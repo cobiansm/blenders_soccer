@@ -122,6 +122,7 @@ const bool DEBUG_PRINT = false;
 ros::Publisher init_pose_pub;
 ros::Publisher dxl_torque_pub;
 ros::Publisher write_head_joint_pub;
+ros::Publisher write_head_joint_offset_pub;
 ros::Publisher write_joint_pub;
 ros::Publisher vision_case_pub;
 ros::Publisher action_pose_pub;
@@ -172,11 +173,26 @@ int main(int argc, char **argv)
   turnNsearch_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/turnNsearch", 5, callbackTurn);
   
   std::string command;
+  std::ifstream myfile ("/home/robotis/blenders_ws/src/soccer_pkg/data/Pararse.txt");
+  if (myfile.is_open()) {
+    std::cout << "El archivo se abrió";
+
+    for (int idx2 = 0; idx2 < row2; idx2++){
+      for (int idy2 = 0; idy2 < col2; idy2++){
+        myfile >> posiciones2[idx2][idy2];
+      }
+      
+    }
+    myfile.close();
+  } else {
+    std::cout << "El archivo no abrió";
+  }
   
   //publishers
   init_pose_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/base/ini_pose", 0);
   dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/dxl_torque", 0);
   write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states", 0);
+  write_head_joint_offset_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states_offset", 0);
   write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/set_joint_states", 0);
   action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis_" + std::to_string(robot_id) + "/action/page_num", 0);
   walk_command_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/walking/command", 0);
@@ -233,7 +249,8 @@ int main(int argc, char **argv)
         write_msg.position.push_back(head_pan + positionx);
         write_msg.name.push_back("head_tilt");
         write_msg.position.push_back(head_tilt + positiony);
-        write_head_joint_pub.publish(write_msg);
+        write_head_joint_offset_pub.publish(write_msg);
+        //write_head_joint_pub.publish(write_msg);
       }else{
         if (distance_to_ball < 0.43 && distance_to_ball != 0.0){
           positiony -= 0.17;
@@ -242,7 +259,8 @@ int main(int argc, char **argv)
         write_msg.position.push_back(positionx);
         write_msg.name.push_back("head_tilt");
         write_msg.position.push_back(positiony);
-        write_head_joint_pub.publish(write_msg);
+        write_head_joint_offset_pub.publish(write_msg);
+        //write_head_joint_pub.publish(write_msg);
       }
     }
 
