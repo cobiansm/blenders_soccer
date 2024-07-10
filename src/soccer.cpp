@@ -69,6 +69,7 @@ const int cols = 6;
 float positions[rows][cols];
 
 //walking
+double rest_inc_giro = 0.08726;
 const double SPOT_FB_OFFSET = 0.0;
 const double SPOT_RL_OFFSET = 0.0;
 const double SPOT_ANGLE_OFFSET = 0.0;
@@ -109,6 +110,17 @@ double d_gain = 0.0012;  //0.045
 double i_gain = 0.00001;
 
 ros::Time prev_time_walk;
+ros::Time start_time = 0;
+ros::Time end_time = 0;
+ros::Time now_time = 0;
+ros::Time start_search = 0;
+ros::Time end_search = 0;
+ros::Time now_search = 0;
+
+double x_target = 0;
+double y_target = 0;
+double t = 0;
+double head_direction = 1;
 
 enum ControlModule
 {
@@ -188,42 +200,44 @@ int main(int argc, char **argv) {
         ros::spinOnce();
         
         if (ball_position.x != 999 && ball_position.y != 999) {
-            ros::Time curr_time_walk = ros::Time::now();
-            ros::Duration dur_w = curr_time_walk - prev_time_walk;
-            double delta_time_w = dur_w.nsec * 0.000000001 + dur_w.sec;
-            prev_time_walk = curr_time_walk;
+            if (tracking();) {
+                ros::Time curr_time_walk = ros::Time::now();
+                ros::Duration dur_w = curr_time_walk - prev_time_walk;
+                double delta_time_w = dur_w.nsec * 0.000000001 + dur_w.sec;
+                prev_time_walk = curr_time_walk;
 
-            count_not_found_ = 0;
+                count_not_found_ = 0;
 
-            distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + current_ball_tilt - hip_pitch_offset_);
+                distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + current_ball_tilt - hip_pitch_offset_);
 
-            if (distance_to_ball < 0) {
-                distance_to_ball *= (-1);
-            }
+                if (distance_to_ball < 0) {
+                    distance_to_ball *= (-1);
+                }
 
-            double distance_to_kick = 0.22;  
-            std::cout << distance_to_ball << std::endl;
-            if ((distance_to_ball < distance_to_kick)) { //&& (fabs(ball_x_angle) < 25.0) to kick
-                count_to_kick_ += 1;	
-                std::cout << count_to_kick_ << std::endl;
-                if (count_to_kick_ > 20) {
-                    std::string command = "stop";
-                    goWalk(command);
-                    if (head_pan > 0) { 
-                        std::cout << "PATEA DERECHA" << std::endl;
-                        goAction(84); //left kick
+                double distance_to_kick = 0.22;  
+                std::cout << distance_to_ball << std::endl;
+                if ((distance_to_ball < distance_to_kick)) { //&& (fabs(ball_x_angle) < 25.0) to kick
+                    count_to_kick_ += 1;	
+                    std::cout << count_to_kick_ << std::endl;
+                    if (count_to_kick_ > 20) {
+                        std::string command = "stop";
+                        goWalk(command);
+                        if (head_pan > 0) { 
+                            std::cout << "PATEA DERECHA" << std::endl;
+                            goAction(84); //left kick
+                        }
+                        else { 
+                            std::cout << "PATEA IZQUIERDA" << std::endl;
+                            goAction(83); //right kick
+                        }
+                    } else if (count_to_kick_ > 15) {
+                    getWalkingParam();
+                    setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
+
+                    std_msgs::String command_msg;
+                    command_msg.data = "start";
+                    walk_command_pub.publish(command_msg);
                     }
-                    else { 
-                        std::cout << "PATEA IZQUIERDA" << std::endl;
-                        goAction(83); //right kick
-                    }
-                } else if (count_to_kick_ > 15) {
-                getWalkingParam();
-                setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
-
-                std_msgs::String command_msg;
-                command_msg.data = "start";
-                walk_command_pub.publish(command_msg);
                 }
             } else {
                 count_to_kick_ = 0;
@@ -245,8 +259,7 @@ int main(int argc, char **argv) {
             goWalk(command);
             //ros::Duration(1.5).sleep();
             setModule("head_control_module");
-            tracking();
-            if ()
+            search();
         }
     }
 }
@@ -256,7 +269,56 @@ void callbackBallCenter(const geometry_msgs::Point& msg) {
     ball_position.y = msg.y; 
 }
 
-void tracking() {
+void turn() {
+    t += 1 * head_direction;
+
+    if (t >= 360):
+        head_direction = -1;
+    elif (t <= -360):
+        self.head_direction = 1;
+
+    x_target = 60*math.sin(1*self.t);
+    y_target = 15*math.cos(1*-t*head_direction) - 30;
+
+    x_target = (ux_noball*math.pi)/180;
+    y_target = (uy_noball*math.pi)/180;
+
+    publishHeadJoint(x_target, y_target);
+
+    if (!start_search)
+        start_search =  ros::Time::now();
+    if (!end_search) {
+        if ((now_search - start_search) > 15)
+            end_search = true;
+        
+        now_search = ros::Time::now();
+    } else {
+        turn_search();
+        ros::Duration.sleep(1.0);
+        start_search = false;
+        end_search = false;
+        now_search = 0;
+    }
+}
+
+void search() {
+    if (!start_time) {
+        start_time = ros::Time::now();
+    } 
+    if (!end_time) {
+        if ((now_time - start_time) > 3) {
+            end_time = true;
+        } 
+        now_time = ros::Time::now();
+    } else {
+        start_time = false;
+        end_time = false;
+        now_time = 0;
+    } 
+    turn();
+}
+
+bool tracking() {
     double xerror = 0;
     double yerror = 0;
     xerror = (320 - ball_position.x) * 70 / 320; //-atan(ball_position.x * tan(FOV_WIDTH));
@@ -288,7 +350,10 @@ void tracking() {
 
         current_ball_pan = xerror;
         current_ball_tilt = yerror;
-  }
+        return false;
+    } else {
+        return true;
+    }
 }
 
 void publishHeadJoint(double pan, double tilt) {
@@ -306,12 +371,80 @@ void publishHeadJoint(double pan, double tilt) {
     write_head_joint_offset_pub.publish(head_angle_msg);
 }
 
+void turn_search(){
+  //node loop
+  sensor_msgs::JointState write_msg;
+  write_msg.header.stamp = ros::Time::now();
+  
+  for (int i = 1; i <= 6; i++)
+  {
+    setModule("none");
+    //std::cout  << "Derechaaaa D:" << std::endl;
+    //Levantar pie derecho 
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("r_ank_pitch");
+    write_msg.position.push_back(-0.7091);
+    write_msg.name.push_back("r_knee");
+    write_msg.position.push_back(-1.4131);
+    write_msg.name.push_back("r_hip_pitch");
+    write_msg.position.push_back(0.7091 + rest_inc_giro);
+    write_msg.name.push_back("r_hip_yaw");
+    write_msg.position.push_back(0.1746*1.5);
+    write_msg.name.push_back("l_hip_yaw");
+    write_msg.position.push_back(-0.1746*1.5);
+
+    write_msg.name.push_back("l_hip_roll");
+    write_msg.position.push_back(-0.0873);
+    write_msg.name.push_back("r_hip_roll");
+    write_msg.position.push_back(0.0873);
+    write_msg.name.push_back("l_ank_roll");
+    write_msg.position.push_back(-0.0873);
+    write_msg.name.push_back("r_ank_roll");
+    write_msg.position.push_back(0.0873);
+    write_joint_pub.publish(write_msg);
+
+    //Bajar pie derecho
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("r_ank_pitch");
+    write_msg.position.push_back(positions[rows-1][0]);
+    write_msg.name.push_back("r_knee");
+    write_msg.position.push_back(positions[rows-1][1]);
+    write_msg.name.push_back("r_hip_pitch");
+    write_msg.position.push_back(positions[rows-1][2] + rest_inc_giro);
+    write_joint_pub.publish(write_msg);
+    
+    //Levantar pie izquierdo
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("l_ank_pitch");
+    write_msg.position.push_back(0.7091);
+    write_msg.name.push_back("l_knee");
+    write_msg.position.push_back(1.4131);
+    write_msg.name.push_back("l_hip_pitch");
+    write_msg.position.push_back(-0.7091 - rest_inc_giro);
+    write_msg.name.push_back("r_hip_yaw");
+    write_msg.position.push_back(0);
+    write_msg.name.push_back("l_hip_yaw");
+    write_msg.position.push_back(0);
+    write_joint_pub.publish(write_msg);
+    
+    //Bajar pie izquierdo
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("l_ank_pitch");
+    write_msg.position.push_back(positions[rows-1][3]);
+    write_msg.name.push_back("l_knee");
+    write_msg.position.push_back(positions[rows-1][4]);
+    write_msg.name.push_back("l_hip_pitch");
+    write_msg.position.push_back(positions[rows-1][5] - rest_inc_giro);
+    write_joint_pub.publish(write_msg);
+  }
+}
+
 void waitFollowing() {
     count_not_found_++;
 
     if (count_not_found_ > NOT_FOUND_THRESHOLD * 0.5)
-    setWalkingParam(0.0, 0.0, 0.0);
-    }
+        setWalkingParam(0.0, 0.0, 0.0);
+}
 
 void calcFootstep(double target_distance, double target_angle, double delta_time, double& fb_move, double& rl_angle) {
     double next_movement = current_x_move_;
@@ -360,8 +493,8 @@ void goAction(int page) {
 void goWalk(std::string& command) {
     setModule("walking_module");
     if (command == "start") {
-    getWalkingParam();
-    setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
+        getWalkingParam();
+        setWalkingParam(IN_PLACE_FB_STEP, 0, 0, true);
     }
 
     std_msgs::String command_msg;
