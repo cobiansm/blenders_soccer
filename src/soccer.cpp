@@ -213,9 +213,9 @@ int main(int argc, char **argv) {
     write_msg.header.stamp = ros::Time::now();
     
     //standing up
-    ros::Duration(1).sleep();
+    ros::Duration(8.0).sleep();
     goAction(9);
-    ros::Duration(2.0).sleep();
+    ros::Duration(8.0).sleep();
     ros::Time prev_time_walk = ros::Time::now();
     ros::Time prev_time = ros::Time::now();
 
@@ -225,6 +225,9 @@ int main(int argc, char **argv) {
         
         if (ball_position.x != 999 && ball_position.y != 999) {
             if (tracking()) {
+
+                ros::Duration(3.0).sleep();
+                setModule("walking_module");
                 ros::Time curr_time_walk = ros::Time::now();
                 ros::Duration dur_w = curr_time_walk - prev_time_walk;
                 double delta_time_w = dur_w.nsec * 0.000000001 + dur_w.sec;
@@ -348,8 +351,8 @@ bool tracking() {
     xerror = (320 - ball_position.x) * 70 / 320; //-atan(ball_position.x * tan(FOV_WIDTH));
     yerror = (240 - ball_position.y) * 70 / 240; //-atan(ball_position.y * tan(FOV_HEIGHT));
 
-    std::cout << "xerror: " << xerror << std::endl;
-    std::cout << "yerror: " << yerror << std::endl;
+    //std::cout << "xerror: " << xerror << std::endl;
+    //std::cout << "yerror: " << yerror << std::endl;
 
     if (xerror >= 10 || xerror <= -10) {
         xerror = xerror * M_PI / 180;

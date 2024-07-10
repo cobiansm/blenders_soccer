@@ -231,10 +231,10 @@ int main(int argc, char **argv)
   write_msg.header.stamp = ros::Time::now();
   
   //pararse en posición para caminar
-  ros::Duration(1).sleep();
+  ros::Duration(5.0).sleep();
 
   goAction(9);
-  ros::Duration(2.0).sleep();
+  ros::Duration(5.0).sleep();
   ros::Time prev_time_ = ros::Time::now();
 
   while (ros::ok())
@@ -246,9 +246,9 @@ int main(int argc, char **argv)
     	setModule("head_control_module");
       if (!search_ball){
         write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(head_pan + positionx);
+        write_msg.position.push_back(positionx - head_pan); //head_pan + positionx
         write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(head_tilt + positiony);
+        write_msg.position.push_back(positiony - head_tilt); //head_tilt + positiony
         write_head_joint_offset_pub.publish(write_msg);
         //write_head_joint_pub.publish(write_msg);
       }else{
@@ -256,16 +256,17 @@ int main(int argc, char **argv)
           positiony -= 0.17;
         }
         write_msg.name.push_back("head_pan");
-        write_msg.position.push_back(positionx);
+        write_msg.position.push_back(positionx - head_pan);
         write_msg.name.push_back("head_tilt");
-        write_msg.position.push_back(positiony);
+        write_msg.position.push_back(positiony - head_tilt);
         write_head_joint_offset_pub.publish(write_msg);
         //write_head_joint_pub.publish(write_msg);
       }
     }
 
     if (turnNsearch){
-      turn2search();
+      //turn2search();
+      std::cout << "girando" << std::endl;
     }/*else{
       std::cout << "NOOOOOOOOOOOO GIRAAAA" << std::endl;
     }*/

@@ -148,7 +148,7 @@ if __name__ == "__main__":
 
     rospy.loginfo("Hello ros")
 
-    subimg = rospy.Subscriber("/usb_cam/image_raw", Image, imageCallback)
+    subimg = rospy.Subscriber("/usb_cam_node/image_raw", Image, imageCallback)
     #subscriptor del angulo de la cabeza
     subangle_head = rospy.Subscriber('robotis_' + str(robot_id) + '/present_joint_states',JointState, angleCallback)
 

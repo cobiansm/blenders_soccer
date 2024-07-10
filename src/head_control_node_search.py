@@ -34,8 +34,8 @@ class HeadControl:
         self.ux1 = 0
         self.uy1 = 0
 
-        self.kpx = 0.00018
-        self.kpy = 0.00018
+        self.kpx = 0.008 #0.00018
+        self.kpy = 0.008 #0.00018
 
         self.errx0 = 0
         self.errx1 = 0

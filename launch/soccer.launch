@@ -27,17 +27,16 @@
   </node>
 
   <!-- Camera Node --> 
-  <node pkg="usb_cam" type="usb_cam" name="usb_cam" output="screen">
+  <node pkg="usb_cam" type="usb_cam_node" name="usb_cam_node" output="screen">
   </node>
 
-  <!-- Vision Node-->
+  <!-- Vision Node
   <node pkg="soccer_pkg" type="pelotahaaros2.py" name="op3_pelotahaaros2" output="screen">
      <param name="robot_id"              value="0"/>
-  </node>
+  </node> -->
 
   <!-- Control Node -->
   <node pkg="soccer_pkg" type="head_control_node_search.py" name="op3_head_control_node_search" output="screen">
      <param name="robot_id"              value="0"/>
   </node>
-
 </launch>
