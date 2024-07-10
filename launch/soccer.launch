@@ -26,9 +26,9 @@
     <param name="robot_id"               value="0"/>
   </node>
 
-  <!-- Camera Node 
+  <!-- Camera Node --> 
   <node pkg="usb_cam" type="usb_cam" name="usb_cam" output="screen">
-  </node>-->
+  </node>
 
   <!-- Vision Node-->
   <node pkg="soccer_pkg" type="pelotahaaros2.py" name="op3_pelotahaaros2" output="screen">

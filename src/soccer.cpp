@@ -4,6 +4,9 @@ Authors: Pedro Deniz
 */
 
 #include <ros/ros.h>
+#include <cmath>
+#include <iostream>
+#include <fstream>
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/Int32.h>
@@ -15,6 +18,7 @@ Authors: Pedro Deniz
 
 #include "robotis_controller_msgs/SetModule.h"
 #include "robotis_controller_msgs/SyncWriteItem.h"
+#include "robotis_math/robotis_linear_algebra.h"
 #include "op3_action_module_msgs/IsRunning.h"
 #include "op3_walking_module_msgs/GetWalkingParam.h"
 #include "op3_walking_module_msgs/WalkingParam.h"
@@ -30,7 +34,7 @@ void goInitPose();
 void goAction(int page);
 void goWalk(std::string& command);
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg);
-void callbackJointStates(const sensor_msgs::JointState& msg);
+//void callbackJointStates(const sensor_msgs::JointState& msg);
 
 //services
 bool isActionRunning();
@@ -46,8 +50,10 @@ void waitFollowing();
 
 //looking
 void callbackBallCenter(const geometry_msgs::Point& msg);
-void tracking();
-void turn2search();
+bool tracking();
+void search();
+void turn();
+void turn_search();
 void publishHeadJoint(double pan, double tilt);
 
 //imu
@@ -91,12 +97,11 @@ const double MIN_FB_STEP = 0.003;
 const double MIN_RL_TURN = 0.08726646;       //5°
 double accum_period_time = 0.0;
 double current_period_time = 0.6;
+double distance_to_kick = 0.22;  
+double delta_time_w;
 std::string command;
 
 //looking
-const double FOV_WIDTH = 35.2 * M_PI / 180;
-const double FOV_HEIGHT = 21.6 * M_PI / 180;
-
 geometry_msgs::Point ball_position;
 sensor_msgs::JointState head_angle_msg;
 
@@ -110,12 +115,13 @@ double d_gain = 0.0012;  //0.045
 double i_gain = 0.00001;
 
 ros::Time prev_time_walk;
-ros::Time start_time = 0;
-ros::Time end_time = 0;
-ros::Time now_time = 0;
-ros::Time start_search = 0;
-ros::Time end_search = 0;
-ros::Time now_search = 0;
+ros::Time prev_time;
+ros::Time start_time(0);
+bool end_time = false;
+ros::Time now_time(0);
+ros::Time start_search(0);
+bool end_search = 0;
+ros::Time now_search(0);
 
 double x_target = 0;
 double y_target = 0;
@@ -152,6 +158,8 @@ ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
 ros::ServiceClient get_param_client;
 
+op3_walking_module_msgs::WalkingParam current_walking_param;
+
 //node main
 int main(int argc, char **argv) {
     //init ros
@@ -161,9 +169,24 @@ int main(int argc, char **argv) {
 
     int robot_id;
     nh.param<int>("robot_id", robot_id, 0);
+    
+    std::ifstream myfile ("/home/robotis/blenders_ws/src/soccer_pkg/data/Pararse.txt");
+    if (myfile.is_open()) {
+    	std::cout << "El archivo se abrió";
+
+	for (int idx2 = 0; idx2 < rows; idx2++){
+		for (int idy2 = 0; idy2 < cols; idy2++){
+			myfile >> positions[idx2][idy2];
+		}
+		
+	}
+	myfile.close();
+    } else {
+	std::cout << "El archivo no abrió";
+    }
 
     //subscribers
-    read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
+    //read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
     ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/ball_center",5, callbackBallCenter);
     imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu",1, callbackImu);
 
@@ -193,14 +216,15 @@ int main(int argc, char **argv) {
     ros::Duration(1).sleep();
     goAction(9);
     ros::Duration(2.0).sleep();
-    ros::Time prev_time_ = ros::Time::now();
+    ros::Time prev_time_walk = ros::Time::now();
+    ros::Time prev_time = ros::Time::now();
 
     while (ros::ok()) {
         ros::Rate loop_rate(SPIN_RATE);
         ros::spinOnce();
         
         if (ball_position.x != 999 && ball_position.y != 999) {
-            if (tracking();) {
+            if (tracking()) {
                 ros::Time curr_time_walk = ros::Time::now();
                 ros::Duration dur_w = curr_time_walk - prev_time_walk;
                 double delta_time_w = dur_w.nsec * 0.000000001 + dur_w.sec;
@@ -214,7 +238,7 @@ int main(int argc, char **argv) {
                     distance_to_ball *= (-1);
                 }
 
-                double distance_to_kick = 0.22;  
+                
                 std::cout << distance_to_ball << std::endl;
                 if ((distance_to_ball < distance_to_kick)) { //&& (fabs(ball_x_angle) < 25.0) to kick
                     count_to_kick_ += 1;	
@@ -222,7 +246,7 @@ int main(int argc, char **argv) {
                     if (count_to_kick_ > 20) {
                         std::string command = "stop";
                         goWalk(command);
-                        if (head_pan > 0) { 
+                        if (current_ball_pan > 0) { 
                             std::cout << "PATEA DERECHA" << std::endl;
                             goAction(84); //left kick
                         }
@@ -272,48 +296,48 @@ void callbackBallCenter(const geometry_msgs::Point& msg) {
 void turn() {
     t += 1 * head_direction;
 
-    if (t >= 360):
+    if (t >= 360)
         head_direction = -1;
-    elif (t <= -360):
-        self.head_direction = 1;
+    else if (t <= -360)
+        head_direction = 1;
 
-    x_target = 60*math.sin(1*self.t);
-    y_target = 15*math.cos(1*-t*head_direction) - 30;
+    x_target = 60*sin(t);
+    y_target = 15*cos(1*-t*head_direction) - 30;
 
-    x_target = (ux_noball*math.pi)/180;
-    y_target = (uy_noball*math.pi)/180;
+    x_target = (x_target*M_PI)/180;
+    y_target = (y_target*M_PI)/180;
 
     publishHeadJoint(x_target, y_target);
 
-    if (!start_search)
+    if (!start_search.toSec())
         start_search =  ros::Time::now();
     if (!end_search) {
-        if ((now_search - start_search) > 15)
+        if ((now_search.toSec() - start_search.toSec()) > 15)
             end_search = true;
         
         now_search = ros::Time::now();
     } else {
         turn_search();
-        ros::Duration.sleep(1.0);
-        start_search = false;
+        ros::Duration(1.0).sleep();
+        start_search = ros::Time(0);
         end_search = false;
-        now_search = 0;
+        now_search = ros::Time(0);
     }
 }
 
 void search() {
-    if (!start_time) {
+    if (!start_time.toSec()) {
         start_time = ros::Time::now();
     } 
     if (!end_time) {
-        if ((now_time - start_time) > 3) {
+        if ((now_time.toSec() - start_time.toSec()) > 3) {
             end_time = true;
         } 
         now_time = ros::Time::now();
     } else {
-        start_time = false;
+        start_time = ros::Time(0);
         end_time = false;
-        now_time = 0;
+        now_time = ros::Time(0);
     } 
     turn();
 }
@@ -473,6 +497,65 @@ void calcFootstep(double target_distance, double target_angle, double delta_time
         if (target_angle < 0)
             rl_angle *= (-1);
     }
+}
+
+void setWalkingParam(double x_move, double y_move, double rotation_angle, bool balance) {
+  current_walking_param.balance_enable = balance;
+  current_walking_param.x_move_amplitude = x_move + SPOT_FB_OFFSET;
+  current_walking_param.y_move_amplitude = y_move + SPOT_RL_OFFSET;
+  current_walking_param.angle_move_amplitude = rotation_angle + SPOT_ANGLE_OFFSET;
+
+  set_walking_param_pub.publish(current_walking_param);
+
+  current_x_move_ = x_move;
+  current_r_angle_ = rotation_angle;
+}
+
+bool getWalkingParam() {
+  
+  op3_walking_module_msgs::GetWalkingParam walking_param_msg;
+
+  if (get_param_client.call(walking_param_msg))
+  {
+    current_walking_param = walking_param_msg.response.parameters;
+
+    // update ui
+    ROS_INFO_COND(DEBUG_PRINT, "Get walking parameters");
+
+    return true;
+  }
+  else
+  {
+    ROS_ERROR("Fail to get walking parameters.");
+
+    return false;
+  }
+}
+
+void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) {
+  Eigen::Quaterniond orientation(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
+  Eigen::MatrixXd rpy_orientation = robotis_framework::convertQuaternionToRPY(orientation);
+  rpy_orientation *= (180 / 3.141516);
+  
+  double pitch = rpy_orientation.coeff(1, 0);
+
+  if (present_pitch_ == 0) 
+    present_pitch_ = pitch;
+  else
+    present_pitch_ = present_pitch_ * (1 - alpha) + pitch * alpha;
+
+  if (present_pitch_ > FALL_FORWARD_LIMIT) {
+    goAction(122);
+    setModule("none");
+  } else if (present_pitch_ < FALL_BACK_LIMIT) {
+    goAction(1);
+    setModule("none");
+    ros::Duration(1).sleep();
+    goAction(82);
+    setModule("none");
+  } else {
+    state = 0;
+  }
 }
 
 void goInitPose() {
