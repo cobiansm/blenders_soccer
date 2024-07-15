@@ -139,7 +139,7 @@ ros::Subscriber error_sub;
 ros::Subscriber search_ball_sub;
 ros::Subscriber find_ball_sub;
 ros::Subscriber turnNsearch_sub;
-ros::Subscriber error_sub
+ros::Subscriber module_sub;
 
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
@@ -159,9 +159,7 @@ std::string base_module = "base_module";
 std::string none_module = "none";
 
 //node main
-int main(int argc, char **argv)
-{
-  
+int main(int argc, char **argv) {
   //init ros
   ros::init(argc, argv, "read_write");
   ros::NodeHandle nh(ros::this_node::getName());
@@ -177,7 +175,7 @@ int main(int argc, char **argv)
   imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu", 1, callbackImu);
   find_ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/find_ball", 5, callbackfindBall);
   turnNsearch_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/turnNsearch", 5, callbackTurn);
-  error_sub = nh.subscribe("/robotis/present_joint_ctrl_modules", 5, callbackModules);
+  module_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/present_joint_ctrl_modules", 5, callbackModules);
   
   std::string command;
   std::ifstream myfile ("/home/robotis/blenders_ws/src/soccer_pkg/data/Pararse.txt");
@@ -254,22 +252,21 @@ int main(int argc, char **argv)
   ros::Duration(1.0).sleep();
   ros::Time prev_time_ = ros::Time::now();
 
-  while (ros::ok())
-  {
+  while (ros::ok()) {
     ros::Rate loop_rate(SPIN_RATE);
     ros::spinOnce();
 
-    if (!ball){
+    if (!ball) {
     	setModule("head_control_module");
-      if (!search_ball){
+      if (!search_ball) {
         write_msg.name.push_back("head_pan");
         write_msg.position.push_back(positionx - head_pan); //head_pan + positionx
         write_msg.name.push_back("head_tilt");
         write_msg.position.push_back(positiony - head_tilt); //head_tilt + positiony
         write_head_joint_offset_pub.publish(write_msg);
         //write_head_joint_pub.publish(write_msg);
-      }else{
-        if (distance_to_ball < 0.43 && distance_to_ball != 0.0){
+      } else {
+        if (distance_to_ball < 0.43 && distance_to_ball != 0.0) {
           positiony -= 0.17;
         }
         write_msg.name.push_back("head_pan");
@@ -281,7 +278,7 @@ int main(int argc, char **argv)
       }
     }
 
-    if (turnNsearch){
+    if (turnNsearch) {
       //turn2search();
       std::cout << "girando" << std::endl;
     }/*else{
@@ -290,10 +287,10 @@ int main(int argc, char **argv)
     //errorx = 0;
     //errory = 0;
         
-	  setModule("walking_module");
+    setModule("walking_module");
         
     //if ((errorx > -8 && errorx < 8) && (errory > -8 && errory < 8) && (errorx != 0) && (errory != 0)){
-    if (ball){	
+    if (ball) {	
 	  	ros::Time curr_time = ros::Time::now();
       ros::Duration dur = curr_time - prev_time_;
       double delta_time = dur.nsec * 0.000000001 + dur.sec;
@@ -303,7 +300,7 @@ int main(int argc, char **argv)
 
       distance_to_ball = CAMERA_HEIGHT * tan(M_PI * 0.5 + head_tilt - hip_pitch_offset_);
 
-      if (distance_to_ball < 0){
+      if (distance_to_ball < 0) {
         distance_to_ball *= (-1);
       }
 
@@ -359,8 +356,7 @@ int main(int argc, char **argv)
 	return 0;
   }
 
-void readyToDemo()
-{
+void readyToDemo() {
   ROS_INFO("Start read-write demo");
   torqueOnAll();
   ROS_INFO("Torque on all joints");
@@ -375,20 +371,18 @@ void readyToDemo()
   setModule("none");
 }
 
-void goInitPose()
-{
+void goInitPose() {
   std_msgs::String init_msg;
   init_msg.data = "ini_pose";
   init_pose_pub.publish(init_msg);
 }
 
-void turn2search(){
+void turn2search() {
   //node loop
   sensor_msgs::JointState write_msg;
   write_msg.header.stamp = ros::Time::now();
   
-  for (int i = 1; i <= 6; i++)
-  {
+  for (int i = 1; i <= 6; i++) {
     setModule("none");
     std::cout  << "Derechaaaa D:" << std::endl;
     //Levantar pie derecho 
@@ -450,8 +444,7 @@ void turn2search(){
   }
 }
 
-void goAction(int page) 
-{
+void goAction(int page) {
   setModule("action_module");
   ROS_INFO("Action pose");
 
@@ -460,8 +453,7 @@ void goAction(int page)
   action_pose_pub.publish(action_msg);
 }
 
-void goWalk(std::string& command) 
-{
+void goWalk(std::string& command) {
   setModule("walking_module");
   if (command == "start") {
     getWalkingParam();
@@ -473,24 +465,21 @@ void goWalk(std::string& command)
   walk_command_pub.publish(command_msg);
 }
 
-void waitFollowing() 
-{
+void waitFollowing() {
   count_not_found_++;
 
   if (count_not_found_ > NOT_FOUND_THRESHOLD * 0.5)
     setWalkingParam(0.0, 0.0, 0.0);
 }
 
-void calcFootstep(double target_distance, double target_angle, double delta_time, double& fb_move, double& rl_angle) 
-{
+void calcFootstep(double target_distance, double target_angle, double delta_time, double& fb_move, double& rl_angle) {
   double next_movement = current_x_move_;
   if (target_distance < 0)
     target_distance = 0.0;
 
   double fb_goal = fmin(target_distance * 0.1, MAX_FB_STEP);
   accum_period_time += delta_time;
-  if (accum_period_time > (current_period_time  / 4))
-  {
+  if (accum_period_time > (current_period_time  / 4)) {
     accum_period_time = 0.0;
     if ((target_distance * 0.1 / 2) < current_x_move_)
       next_movement -= UNIT_FB_STEP;
@@ -501,8 +490,7 @@ void calcFootstep(double target_distance, double target_angle, double delta_time
   fb_move = fmax(fb_goal, MIN_FB_STEP);
 
   double rl_goal = 0.0;
-  if (fabs(target_angle) * 180 / M_PI > 5.0)
-  {
+  if (fabs(target_angle) * 180 / M_PI > 5.0) {
     double rl_offset = fabs(target_angle) * 0.2;
     rl_goal = fmin(rl_offset, MAX_RL_TURN);
     rl_goal = fmax(rl_goal, MIN_RL_TURN);
@@ -513,13 +501,11 @@ void calcFootstep(double target_distance, double target_angle, double delta_time
   }
 }
 
-bool checkManagerRunning(std::string& manager_name) 
-{
+bool checkManagerRunning(std::string& manager_name) {
   std::vector<std::string> node_list;
   ros::master::getNodes(node_list);
 
-  for (unsigned int node_list_idx = 0; node_list_idx < node_list.size(); node_list_idx++)
-  {
+  for (unsigned int node_list_idx = 0; node_list_idx < node_list.size(); node_list_idx++) {
     if (node_list[node_list_idx] == manager_name)
       return true;
   }
@@ -527,28 +513,24 @@ bool checkManagerRunning(std::string& manager_name)
   return false;
 }
 
-void setModule(const std::string& module_name) 
-{
+void setModule(const std::string& module_name) {
   robotis_controller_msgs::SetModule set_module_srv;
   set_module_srv.request.module_name = module_name;
 
-  if (set_joint_module_client.call(set_module_srv) == false)
-  {
+  if (set_joint_module_client.call(set_module_srv) == false) {
     ROS_ERROR("Failed to set module");
     return;
   }
   return ;
 }
 
-void torqueOnAll() 
-{
+void torqueOnAll() {
   std_msgs::String check_msg;
   check_msg.data = "check";
   dxl_torque_pub.publish(check_msg);
 }
 
-bool isActionRunning() 
-{
+bool isActionRunning() {
   op3_action_module_msgs::IsRunning is_running_srv;
 
   if (is_running_client.call(is_running_srv) == false) {
@@ -562,8 +544,7 @@ bool isActionRunning()
   return false;
 }
 
-void setWalkingParam(double x_move, double y_move, double rotation_angle, bool balance)
-{
+void setWalkingParam(double x_move, double y_move, double rotation_angle, bool balance) {
   current_walking_param.balance_enable = balance;
   current_walking_param.x_move_amplitude = x_move + SPOT_FB_OFFSET;
   current_walking_param.y_move_amplitude = y_move + SPOT_RL_OFFSET;
@@ -575,22 +556,17 @@ void setWalkingParam(double x_move, double y_move, double rotation_angle, bool b
   current_r_angle_ = rotation_angle;
 }
 
-bool getWalkingParam() 
-{
-  
+bool getWalkingParam() {
   op3_walking_module_msgs::GetWalkingParam walking_param_msg;
 
-  if (get_param_client.call(walking_param_msg))
-  {
+  if (get_param_client.call(walking_param_msg)) {
     current_walking_param = walking_param_msg.response.parameters;
 
     // update ui
     ROS_INFO_COND(DEBUG_PRINT, "Get walking parameters");
 
     return true;
-  }
-  else
-  {
+  } else {
     ROS_ERROR("Fail to get walking parameters.");
 
     return false;
