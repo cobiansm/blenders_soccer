@@ -237,8 +237,9 @@ int main(int argc, char **argv) {
         ros::spinOnce();
         
         if (ball_position.x != 999 && ball_position.y != 999) {
+	    setModule("head_control_module");
             if (tracking()) {
-                ros::Duration(3.0).sleep();
+                ros::Duration(1.0).sleep();
                 setModule("walking_module");
                 ros::Time curr_time_walk = ros::Time::now();
                 ros::Duration dur_w = curr_time_walk - prev_time_walk;
@@ -301,6 +302,7 @@ int main(int argc, char **argv) {
             search();
         }
     }
+    return 0;
 }
 
 void callbackBallCenter(const geometry_msgs::Point& msg) {
@@ -530,8 +532,7 @@ bool getWalkingParam() {
   
   op3_walking_module_msgs::GetWalkingParam walking_param_msg;
 
-  if (get_param_client.call(walking_param_msg))
-  {
+  if (get_param_client.call(walking_param_msg)) {
     current_walking_param = walking_param_msg.response.parameters;
 
     // update ui
@@ -539,8 +540,7 @@ bool getWalkingParam() {
 
     return true;
   }
-  else
-  {
+  else {
     ROS_ERROR("Fail to get walking parameters.");
 
     return false;
