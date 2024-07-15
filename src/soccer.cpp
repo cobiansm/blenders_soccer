@@ -148,7 +148,6 @@ ros::Publisher write_joint_pub;
 ros::Publisher action_pose_pub;
 ros::Publisher walk_command_pub;
 ros::Publisher set_walking_param_pub;
-ros::Publisher reset_body_pub;
 
 ros::Subscriber read_joint_sub;
 ros::Subscriber ball_sub;
@@ -197,8 +196,7 @@ int main(int argc, char **argv) {
     action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis_" + std::to_string(robot_id) + "/action/page_num",0);
     walk_command_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/walking/command",0);
     set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/set_params",0);
-    reset_body_pub = nh.advertise<std_msgs::Bool>("/robotis_" + std::to_string(robot_id) + "/online_walking/reset_body",0);
-
+    
     //services
     set_joint_module_client = nh.serviceClient<robotis_controller_msgs::SetModule>("/robotis_" + std::to_string(robot_id) + "/set_present_ctrl_modules");
     is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis_" + std::to_string(robot_id) + "/action/is_running");
