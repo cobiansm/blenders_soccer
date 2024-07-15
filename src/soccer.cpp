@@ -34,6 +34,7 @@ void goInitPose();
 void goAction(int page);
 void goWalk(std::string& command);
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg);
+void callbackModules(const robotis_controller_msgs::JointCtrlModule& module_name);
 //void callbackJointStates(const sensor_msgs::JointState& msg);
 
 //services
@@ -55,6 +56,11 @@ void search();
 void turn();
 void turn_search();
 void publishHeadJoint(double pan, double tilt);
+
+//modules
+std::string modules_name;
+std::string base_module = "base_module";
+std::string none_module = "none";
 
 //imu
 double alpha = 0.4;
@@ -152,6 +158,7 @@ ros::Publisher set_walking_param_pub;
 ros::Subscriber read_joint_sub;
 ros::Subscriber ball_sub;
 ros::Subscriber imu_sub;
+ros::Subscriber module_sub;
 
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
@@ -187,7 +194,8 @@ int main(int argc, char **argv) {
     //read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
     ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/ball_center",5, callbackBallCenter);
     imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu",1, callbackImu);
-
+    module_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/present_joint_ctrl_modules", 5, callbackModules);
+  
     //publishers
     init_pose_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/base/ini_pose",0);
     dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/dxl_torque",0);
@@ -218,15 +226,27 @@ int main(int argc, char **argv) {
 	ROS_WARN("Waiting for op3 manager");
     }
     readyToDemo();
+
+    while (ros::ok) {
+      if (modules_name.empty()) {
+	continue;
+      } else if(modules_name == base_module) {
+        ros::Duration(10.0).sleep();
+	setModule("none");
+      } else if(modules_name == none_module) {
+	ROS_INFO("module name is none");
+        break;
+      }
+    }
 	
     //node loop
     sensor_msgs::JointState write_msg;
     write_msg.header.stamp = ros::Time::now();
     
     //standing up
-    ros::Duration(5.0).sleep();
+    ros::Duration(1.0).sleep();
     goAction(9);
-    ros::Duration(5.0).sleep();
+    ros::Duration(1.0).sleep();
     ros::Time prev_time_walk = ros::Time::now();
     ros::Time prev_time = ros::Time::now();
 
@@ -596,6 +616,10 @@ void goWalk(std::string& command) {
     std_msgs::String command_msg;
     command_msg.data = command;
     walk_command_pub.publish(command_msg);
+}
+
+void callbackModules(const robotis_controller_msgs::JointCtrlModule& module_name) {
+  modules_name = module_name.module_name[0];
 }
 
 void readyToDemo() {
