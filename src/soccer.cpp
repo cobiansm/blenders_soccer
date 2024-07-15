@@ -165,7 +165,6 @@ int main(int argc, char **argv) {
     //init ros
     ros::init(argc, argv, "soccer");
     ros::NodeHandle nh(ros::this_node::getName());
-    ros::start();
 
     int robot_id;
     nh.param<int>("robot_id", robot_id, 0);
@@ -205,17 +204,31 @@ int main(int argc, char **argv) {
     is_running_client = nh.serviceClient<op3_action_module_msgs::IsRunning>("/robotis_" + std::to_string(robot_id) + "/action/is_running");
     get_param_client = nh.serviceClient<op3_walking_module_msgs::GetWalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/get_params");
 
+    ros::start();
+    ros::Rate loop_rate(SPIN_RATE);
+	
     //wait for starting of op3_manager
     std::string manager_name = "/op3_manager";
-
+	
+    while (ros::ok()) {
+        ros::Duration(1.0).sleep();
+	
+	if (checkManagerRunning(manager_name) == true) {
+	    break;
+	    ROS_INFO_COND(DEBUG_PRINT, "Succeed to connect");
+	}
+	ROS_WARN("Waiting for op3 manager");
+    }
+    readyToDemo();
+	
     //node loop
     sensor_msgs::JointState write_msg;
     write_msg.header.stamp = ros::Time::now();
     
     //standing up
-    ros::Duration(8.0).sleep();
+    ros::Duration(5.0).sleep();
     goAction(9);
-    ros::Duration(8.0).sleep();
+    ros::Duration(5.0).sleep();
     ros::Time prev_time_walk = ros::Time::now();
     ros::Time prev_time = ros::Time::now();
 
@@ -225,7 +238,6 @@ int main(int argc, char **argv) {
         
         if (ball_position.x != 999 && ball_position.y != 999) {
             if (tracking()) {
-
                 ros::Duration(3.0).sleep();
                 setModule("walking_module");
                 ros::Time curr_time_walk = ros::Time::now();
