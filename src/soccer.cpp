@@ -179,8 +179,8 @@ int main(int argc, char **argv) {
     if (myfile.is_open()) {
     	std::cout << "El archivo se abrió";
 
-	for (int idx2 = 0; idx2 < rows; idx2++){
-		for (int idy2 = 0; idy2 < cols; idy2++){
+	for (int idx2 = 0; idx2 < rows; idx2++) {
+		for (int idy2 = 0; idy2 < cols; idy2++) {
 			myfile >> positions[idx2][idy2];
 		}
 		
@@ -283,8 +283,7 @@ int main(int argc, char **argv) {
                         if (current_ball_pan > 0) { 
                             std::cout << "PATEA DERECHA" << std::endl;
                             goAction(84); //left kick
-                        }
-                        else { 
+                        } else { 
                             std::cout << "PATEA IZQUIERDA" << std::endl;
                             goAction(83); //right kick
                         }
@@ -430,13 +429,12 @@ void publishHeadJoint(double pan, double tilt) {
     write_head_joint_offset_pub.publish(head_angle_msg);
 }
 
-void turn_search(){
+void turn_search() {
   //node loop
   sensor_msgs::JointState write_msg;
   write_msg.header.stamp = ros::Time::now();
   
-  for (int i = 1; i <= 6; i++)
-  {
+  for (int i = 1; i <= 6; i++) {
     setModule("none");
     //std::cout  << "Derechaaaa D:" << std::endl;
     //Levantar pie derecho 
