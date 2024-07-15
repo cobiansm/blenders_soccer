@@ -54,6 +54,7 @@ void callbackError(const geometry_msgs::Point& msg);
 void callbackTurn(const std_msgs::Bool& msg);
 void callbackfindBall(const std_msgs::Bool& msg);
 void callbackSearchBall(const std_msgs::Bool& msg);
+void callbackModules(const robotis_controller_msgs::JointCtrlModule& module_name);
 
 
 double rest_inc = 0.2181;
@@ -138,6 +139,7 @@ ros::Subscriber error_sub;
 ros::Subscriber search_ball_sub;
 ros::Subscriber find_ball_sub;
 ros::Subscriber turnNsearch_sub;
+ros::Subscriber error_sub
 
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
@@ -151,6 +153,10 @@ bool demo_ready = false;
 bool ball = false;
 bool turnNsearch = false;
 bool search_ball = false;
+
+std::string modules_name;
+std::string base_module = "base_module";
+std::string none_module = "none";
 
 //node main
 int main(int argc, char **argv)
@@ -171,6 +177,7 @@ int main(int argc, char **argv)
   imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu", 1, callbackImu);
   find_ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/find_ball", 5, callbackfindBall);
   turnNsearch_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/turnNsearch", 5, callbackTurn);
+  error_sub = nh.subscribe("/robotis/present_joint_ctrl_modules", 5, callbackModules);
   
   std::string command;
   std::ifstream myfile ("/home/robotis/blenders_ws/src/soccer_pkg/data/Pararse.txt");
@@ -225,16 +232,26 @@ int main(int argc, char **argv)
   }
 
   readyToDemo();
+  
+  if (modules_name.empty()) {
+      continue;
+  } else if(modules_name == base_module) {
+      ros::Duration(10.0).sleep();
+      setModule("none");
+  } else if(modules_name == none_module) {
+      ROS_INFO("module name is none");
+      break;
+  }
+}
 
   //node loop
   sensor_msgs::JointState write_msg;
   write_msg.header.stamp = ros::Time::now();
   
   //pararse en posición para caminar
-  ros::Duration(5.0).sleep();
-
+  ros::Duration(1.0).sleep();
   goAction(9);
-  ros::Duration(5.0).sleep();
+  ros::Duration(1.0).sleep();
   ros::Time prev_time_ = ros::Time::now();
 
   while (ros::ok())
@@ -580,27 +597,27 @@ bool getWalkingParam()
   }
 }
 
-void callbackJointStates(const sensor_msgs::JointState& msg)
-{ 
+void callbackModules(const robotis_controller_msgs::JointCtrlModule& module_name) {
+  modules_name = module_name.module_name[0];
+}
+
+void callbackJointStates(const sensor_msgs::JointState& msg) { 
   head_pan = msg.position[0];
   head_tilt = msg.position[1];
   return;
 }
 
-void callbackPosition(const geometry_msgs::Point& msg)
-{
+void callbackPosition(const geometry_msgs::Point& msg) {
   positionx = msg.x;
   positiony = msg.y;
 }
 
-void callbackError(const geometry_msgs::Point& msg)
-{
+void callbackError(const geometry_msgs::Point& msg) {
   errorx = msg.x;
   errory = msg.y;
 }
 
-void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) 
-{
+void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) {
   Eigen::Quaterniond orientation(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
   Eigen::MatrixXd rpy_orientation = robotis_framework::convertQuaternionToRPY(orientation);
   rpy_orientation *= (180 / 3.141516);
@@ -626,17 +643,14 @@ void callbackImu(const sensor_msgs::Imu::ConstPtr& msg)
   }
 }
 
-void callbackfindBall(const std_msgs::Bool& msg)
-{
+void callbackfindBall(const std_msgs::Bool& msg) {
   ball = msg.data;
 }
 
-void callbackTurn(const std_msgs::Bool& msg)
-{
+void callbackTurn(const std_msgs::Bool& msg) {
   turnNsearch = msg.data;
 }
 
-void callbackSearchBall(const std_msgs::Bool& msg)
-{
+void callbackSearchBall(const std_msgs::Bool& msg) {
   search_ball = msg.data;
 }
