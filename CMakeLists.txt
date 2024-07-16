@@ -143,13 +143,13 @@ include_directories(
 
 ## Declare a C++ executable
 #add_executable(${PROJECT_NAME}_node src/soccer_pkg_node.cpp)
-add_executable(read_write
-  src/read_write.cpp
+add_executable(ball_tracker
+  src/ball_tracker.cpp
 )
 
 ## Add cmake target dependencies of the library
 #add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(read_write
+add_dependencies(ball_tracker
   ${${PROJECT_NAME}_EXPORTED_TARGETS}
   ${catkin_EXPORTED_TARGETS}
 )
@@ -169,7 +169,7 @@ add_dependencies(read_write
 #   ${catkin_LIBRARIES}
 #)
 
-target_link_libraries(read_write
+target_link_libraries(ball_tracker
   ${catkin_LIBRARIES}
   ${Eigen3_LIBRARIES}
 )
@@ -195,7 +195,7 @@ target_link_libraries(read_write
 #   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 #)
 
-install(TARGETS read_write
+install(TARGETS ball_tracker
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

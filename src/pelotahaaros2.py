@@ -142,7 +142,7 @@ if __name__ == "__main__":
     rospy.init_node('image')
     robot_id = rospy.get_param('robot_id', 0)
     pub_img = rospy.Publisher('robotis_' + str(robot_id) + '/ImgFinal', Image, queue_size=1)
-    pub_center = rospy.Publisher('robotis_' + str(robot_id) + '/BallCenter', Point, queue_size=1)
+    pub_center = rospy.Publisher('robotis_' + str(robot_id) + '/ball_center', Point, queue_size=1)
     pub_slope = rospy.Publisher('robotis_' + str(robot_id) + '/Slope', Float64, queue_size=1)
     #self.subimg = rospy.Subscriber("/robotis_" + str(self.robot_id) +"/usb_cam/image_raw", Image, self.image_callback)
 

@@ -41,7 +41,6 @@ void callbackModules(const robotis_controller_msgs::JointCtrlModule& module_name
 bool isActionRunning();
 bool getWalkingParam();
 bool getJointPose();
-void waitFollowing();
 
 //walking
 void calcFootstep(double target_distance, double target_angle, double delta_time, double& fb_move, double& rl_angle);

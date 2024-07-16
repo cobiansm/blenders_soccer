@@ -231,16 +231,17 @@ int main(int argc, char **argv) {
 
   readyToDemo();
   
-  if (modules_name.empty()) {
-      continue;
-  } else if(modules_name == base_module) {
-      ros::Duration(10.0).sleep();
-      setModule("none");
-  } else if(modules_name == none_module) {
-      ROS_INFO("module name is none");
-      break;
+  while (ros::ok) { 
+    if (modules_name.empty()) {
+        continue;
+    } else if(modules_name == base_module) {
+        ros::Duration(10.0).sleep();
+        setModule("none");
+    } else if(modules_name == none_module) {
+        ROS_INFO("module name is none");
+        break;
+    }
   }
-}
 
   //node loop
   sensor_msgs::JointState write_msg;
@@ -346,7 +347,7 @@ int main(int argc, char **argv) {
       std_msgs::String command_msg;
       command_msg.data = "start";
       walk_command_pub.publish(command_msg);
-		}else{
+		} else {
 		  std::string command = "stop";
 		  goWalk(command);
 	    ros::Duration(1.5).sleep();
