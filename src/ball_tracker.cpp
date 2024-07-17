@@ -4,10 +4,12 @@ Authors: Pedro Deniz
 */
 
 #include <std_srvs/Empty.h>
-#include <chrono>
-#include <thread>
 
 #include <ros/ros.h>
+#include <cmath>
+#include <iostream>
+#include <fstream>
+
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/Int32.h>
@@ -15,8 +17,6 @@ Authors: Pedro Deniz
 #include <sensor_msgs/JointState.h>
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/Point.h>
-#include <iostream>
-#include <fstream>
 #include <eigen3/Eigen/Eigen>
 
 #include "robotis_controller_msgs/SetModule.h"
@@ -66,6 +66,11 @@ double yerror_sum = 0;
 double p_gain = 0.105; //0.6
 double d_gain = 0.0012; //0.045
 double i_gain = 0.00001;
+
+double x_target = 0;
+double y_target = 0;
+double t = 0;
+double head_direction = 1;
 
 ros::Time prev_time;
 ros::Time prev_time_walk;
@@ -253,7 +258,8 @@ void tracking() {
     std::cout << "no hay pelota" << std:: endl;
     std::string command = "stop";
     goWalk(command);
-    ros::Duration(1.5).sleep();
+    ros::Duration(1.0).sleep();
+    turnToBall();
   }
 }
 
@@ -270,6 +276,22 @@ void publishHeadJoint(double pan, double tilt) {
   head_angle_msg.position.push_back(tilt);
 
   write_head_joint_offset_pub.publish(head_angle_msg);
+}
+
+void turnToBall() {
+  t += 1 * head_direction;
+
+  if (t >= 360)
+      head_direction = -1;
+  else if (t <= -360)
+      head_direction = 1;
+
+  x_target = 60*sin(t);
+  y_target = 15*cos(1*-t*head_direction) - 30;
+
+  x_target = (x_target*M_PI)/180;
+  y_target = (y_target*M_PI)/180;
+  publishHeadJoint(x_target, y_target);
 }
 
 void walkTowardsBall(double pan, double tilt) {
@@ -485,7 +507,7 @@ void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) {
   } else if (present_pitch_ < FALL_BACK_LIMIT) {
     goAction(1);
     setModule("none");
-    ros::Duration(1).sleep();
+    ros::Duration(1.0).sleep();
     goAction(82);
     setModule("none");
   } else {

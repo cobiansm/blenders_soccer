@@ -18,6 +18,7 @@ Authors: Pedro Deniz
 
 #include "robotis_controller_msgs/SetModule.h"
 #include "robotis_controller_msgs/SyncWriteItem.h"
+#include "robotis_controller_msgs/JointCtrlModule.h"
 #include "robotis_math/robotis_linear_algebra.h"
 #include "op3_action_module_msgs/IsRunning.h"
 #include "op3_walking_module_msgs/GetWalkingParam.h"
