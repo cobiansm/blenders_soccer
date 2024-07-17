@@ -50,11 +50,9 @@ void callbackBallCenter(const geometry_msgs::Point& msg);
 //void callbackJointStates(const sensor_msgs::JointState& msg);
 void tracking();
 void publishHeadJoint(double pan, double tilt);
+void turnToBall();
 
 //head control
-const double FOV_WIDTH = 35.2 * M_PI / 180;
-const double FOV_HEIGHT = 21.6 * M_PI / 180;
-
 geometry_msgs::Point ball_position;
 sensor_msgs::JointState head_angle_msg;
 
@@ -600,9 +598,5 @@ bool isActionRunning() {
   return false;
 }
 
-void callbackBallCenter(const geometry_msgs::Point& msg) {
-  ball_position.x = msg.x; // 320) - 1;
-  ball_position.y = msg.y; // 240) - 1;
-}
 
 
