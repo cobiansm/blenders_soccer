@@ -17,6 +17,7 @@ Authors: Pedro Deniz
 #include <sensor_msgs/JointState.h>
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/Point.h>
+#include <soccer_pkg/referee.h>
 #include <eigen3/Eigen/Eigen>
 
 #include "robotis_controller_msgs/SetModule.h"
@@ -35,6 +36,8 @@ void goInitPose();
 void goAction(int page);
 void goWalk(std::string& command);
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg);
+void callbackReferee(const soccer_pkg::referee& msg);
+void buttonHandlerCallback(const std_msgs::String::ConstPtr& msg);
 //void turn2search();
 
 bool isActionRunning();
@@ -50,7 +53,9 @@ void callbackBallCenter(const geometry_msgs::Point& msg);
 //void callbackJointStates(const sensor_msgs::JointState& msg);
 void tracking();
 void publishHeadJoint(double pan, double tilt);
-void turnToBall();
+void publishHeadJointSearch(double pan, double tilt);
+void walkTowardsBall(double pan, double tilt);
+void turnToBall(double pan, double tilt);
 
 //head control
 geometry_msgs::Point ball_position;
@@ -72,6 +77,12 @@ double head_direction = 1;
 
 ros::Time prev_time;
 ros::Time prev_time_walk;
+
+//referee
+int referee_state = 0;
+
+//button
+bool start_button_flag = false;
 
 //imu
 double alpha = 0.4;
@@ -98,9 +109,9 @@ const double FOV_HEIGHT = 21.6 * M_PI / 180;
 const double hip_pitch_offset_ = 0.12217305; //7°
 const double UNIT_FB_STEP = 0.002;
 const double UNIT_RL_TURN = 0.00872665;      //0.5°
-const double MAX_FB_STEP = 0.007;
+const double MAX_FB_STEP = 0.04; //0.007;
 const double MAX_RL_TURN =  0.26179939;      //15°
-const double MIN_FB_STEP = 0.003;
+const double MIN_FB_STEP = 0.024; //0.003;
 const double MIN_RL_TURN = 0.08726646;       //5°
 double accum_period_time = 0.0;
 double current_period_time = 0.6;
@@ -135,6 +146,8 @@ ros::Publisher set_walking_param_pub;
 ros::Subscriber read_joint_sub;
 ros::Subscriber ball_sub;
 ros::Subscriber imu_sub;
+ros::Subscriber ref_sub;
+ros::Subscriber button_sub;
 
 ros::ServiceClient set_joint_module_client;
 ros::ServiceClient is_running_client;
@@ -157,7 +170,9 @@ int main(int argc, char **argv) {
   //subscribers
   //read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
   ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/ball_center", 5, callbackBallCenter);
-  imu_sub = nh.subscribe("/robotis/open_cr/imu", 1, callbackImu);
+  imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu", 1, callbackImu);
+  ref_sub = nh.subscribe("/r_data", 1, callbackReferee);
+  button_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/button", 1, buttonHandlerCallback);
   
   //publishers
   init_pose_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/base/ini_pose", 0);
@@ -201,6 +216,18 @@ int main(int argc, char **argv) {
 
   write_head_joint_pub.publish(head_angle_msg);
 
+  while (ros::ok()) {
+    ros::spinOnce();
+    if (start_button_flag == 1){
+      asm("NOP");
+      std::cout  << "MUEVETE" << std::endl;
+      break;
+    } else {
+      std::cout  << "nada" << std::endl; 
+      continue;
+    }
+  }
+
   //node loop
   sensor_msgs::JointState write_msg;
   write_msg.header.stamp = ros::Time::now();
@@ -209,6 +236,7 @@ int main(int argc, char **argv) {
 
   while (ros::ok()) {
     ros::spinOnce();
+
     setModule("head_control_module");
     tracking();
   }
@@ -220,14 +248,14 @@ void tracking() {
   double xerror = 0;
   double yerror = 0;
 
-  if (ball_position.x != 999 || ball_position.y != 999) {
+  if ((ball_position.x != 999 || ball_position.y != 999) && (referee_state >= 1 && referee_state <= 2)) {  // Sólo jugar o quedarse quieto
     xerror = (320 - ball_position.x) * 70 / 320; //-atan(ball_position.x * tan(FOV_WIDTH));
     yerror = (240 - ball_position.y) * 70 / 240; //-atan(ball_position.y * tan(FOV_HEIGHT));
 
     std::cout << "xerror: " << xerror << std::endl;
     std::cout << "yerror: " << yerror << std::endl;
 
-    if (xerror >= 10 || xerror <= -10) {
+    if ((xerror >= 10 || xerror <= -10) && (yerror >= 10 || yerror <= -10)) {
       xerror = xerror * M_PI / 180;
       yerror = yerror * M_PI / 180;
 
@@ -247,7 +275,11 @@ void tracking() {
       double yerror_target = yerror * p_gain + yerror_dif * d_gain + yerror_sum * i_gain;
 
       publishHeadJoint(xerror_target, yerror_target);
+      
+      std::string command = "stop";
+      goWalk(command);
 
+    } else {
       current_ball_pan = xerror;
       current_ball_tilt = yerror;
       walkTowardsBall(current_ball_pan, current_ball_tilt);
@@ -256,8 +288,8 @@ void tracking() {
     std::cout << "no hay pelota" << std:: endl;
     std::string command = "stop";
     goWalk(command);
-    ros::Duration(1.0).sleep();
-    turnToBall();
+    //ros::Duration(1.0).sleep();  //cortafuegos?   -> hay que ver qué onda
+    turnToBall(current_ball_pan, current_ball_tilt);
   }
 }
 
@@ -276,7 +308,22 @@ void publishHeadJoint(double pan, double tilt) {
   write_head_joint_offset_pub.publish(head_angle_msg);
 }
 
-void turnToBall() {
+void publishHeadJointSearch(double pan, double tilt) {
+  if (pan >= 1.2217) pan = 1.2217;            //70 deg
+  else if (pan <= -1.2217) pan = -1.2217;     //-70 deg
+  
+  if (tilt >= 0.34906) tilt = 0.34906;        //20 deg
+  else if (tilt <= -1.2217) tilt = -1.2217;   //-70 deg
+
+  head_angle_msg.name.push_back("head_pan");
+  head_angle_msg.position.push_back(pan);
+  head_angle_msg.name.push_back("head_tilt");
+  head_angle_msg.position.push_back(tilt);
+
+  write_head_joint_pub.publish(head_angle_msg);
+}
+
+void turnToBall(double pan, double tilt) {
   t += 1 * head_direction;
 
   if (t >= 360)
@@ -285,11 +332,11 @@ void turnToBall() {
       head_direction = 1;
 
   x_target = 60*sin(t);
-  y_target = 15*cos(1*-t*head_direction) - 30;
+  y_target = 15*cos(t) - 30;
 
   x_target = (x_target*M_PI)/180;
   y_target = (y_target*M_PI)/180;
-  publishHeadJoint(x_target, y_target);
+  publishHeadJointSearch(x_target, y_target);
 }
 
 void walkTowardsBall(double pan, double tilt) {
@@ -498,7 +545,7 @@ void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) {
     present_pitch_ = pitch;
   else
     present_pitch_ = present_pitch_ * (1 - alpha) + pitch * alpha;
-
+  std::cout << present_pitch_ << std::endl;
   if (present_pitch_ > FALL_FORWARD_LIMIT) {
     goAction(122);
     setModule("none");
@@ -598,5 +645,23 @@ bool isActionRunning() {
   return false;
 }
 
+void callbackReferee(const soccer_pkg::referee& msg) {
+  /*
+  0 = "quieto"
+  1 = "acomodate"
+  2 = "playing"
+  3 = "acercate"
+  4 = "alejate"
+  */
+  referee_state = msg.I
+}
 
-
+void buttonHandlerCallback(const std_msgs::String::ConstPtr& msg) {
+  // in the middle of playing demo
+  if (msg->data == "mode") {
+    // go to mode selection status
+    start_button_flag = 1;
+  } else if (msg->data == "start"){
+    start_button_flag = 0;
+  }
+}
