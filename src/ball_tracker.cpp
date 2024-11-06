@@ -36,9 +36,11 @@ void goInitPose();
 void goAction(int page);
 void goWalk(std::string& command);
 void callbackImu(const sensor_msgs::Imu::ConstPtr& msg);
-void callbackReferee(const soccer_pkg::referee& msg);
+// void callbackReferee(const soccer_pkg::referee& msg);
 void buttonHandlerCallback(const std_msgs::String::ConstPtr& msg);
-//void turn2search();
+void turn2search(int limit);
+void turn2search_left(int limit);
+void callbackJointStates(const sensor_msgs::JointState& msg);
 
 bool isActionRunning();
 bool getJointPose();
@@ -80,9 +82,17 @@ ros::Time prev_time_walk;
 
 //referee
 int referee_state = 0;
+bool playing = true;  // false;
 
 //button
 bool start_button_flag = false;
+
+//turn
+int turn_cnt = 0;
+//standing up txt
+const int rows = 40;
+const int cols = 6;
+float positions[rows][cols];
 
 //imu
 double alpha = 0.4;
@@ -91,6 +101,9 @@ double rpy_orientation;
 const double FALL_FORWARD_LIMIT = 55;
 const double FALL_BACK_LIMIT = -55;
 double present_pitch_;
+
+//searching and walking
+bool search_n_walk = true;
 
 //walking
 double rest_inc_giro = 0.08726;
@@ -167,11 +180,25 @@ int main(int argc, char **argv) {
   int robot_id;
   nh.param<int>("robot_id", robot_id, 0);
 
+  std::ifstream myfile ("/home/robotis/catkin_ws/src/soccer_pkg/data/Pararse.txt");
+  if (myfile.is_open()) {
+    std::cout << "El archivo se abrió";
+
+    for (int idx2 = 0; idx2 < rows; idx2++) {
+      for (int idy2 = 0; idy2 < cols; idy2++) {
+        myfile >> positions[idx2][idy2];
+      }
+  	}
+	  myfile.close();
+  } else {
+	  std::cout << "El archivo no abrió";
+  }
+
   //subscribers
-  //read_joint_sub = nh.subscribe("/robotis/present_joint_states",1, callbackJointStates);
+  //read_joint_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/present_joint_states",1, callbackJointStates);
   ball_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/ball_center", 5, callbackBallCenter);
   imu_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/imu", 1, callbackImu);
-  ref_sub = nh.subscribe("/r_data", 1, callbackReferee);
+  // ref_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/r_data", 1, callbackReferee);
   button_sub = nh.subscribe("/robotis_" + std::to_string(robot_id) + "/open_cr/button", 1, buttonHandlerCallback);
   
   //publishers
@@ -179,6 +206,7 @@ int main(int argc, char **argv) {
   dxl_torque_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/dxl_torque", 0);
   write_head_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states", 0);
   write_head_joint_offset_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/head_control/set_joint_states_offset", 0);
+  write_joint_pub = nh.advertise<sensor_msgs::JointState>("/robotis_" + std::to_string(robot_id) + "/set_joint_states", 0);
   action_pose_pub = nh.advertise<std_msgs::Int32>("/robotis_" + std::to_string(robot_id) + "/action/page_num",0);
   walk_command_pub = nh.advertise<std_msgs::String>("/robotis_" + std::to_string(robot_id) + "/walking/command",0);
   set_walking_param_pub = nh.advertise<op3_walking_module_msgs::WalkingParam>("/robotis_" + std::to_string(robot_id) + "/walking/set_params",0);
@@ -226,7 +254,23 @@ int main(int argc, char **argv) {
       std::cout  << "nada" << std::endl; 
       continue;
     }
-  }
+	}
+
+  // while (ros::ok()) {
+  //   ros::spinOnce();
+  //   if (playing){
+  //     break;
+  //   }
+  //   std::cout  << "Amonestado inicialmente" << std::endl;
+	// }
+
+  std::string command = "stop";
+  goWalk(command);
+  ros::Duration(3.0).sleep();
+  // walkTowardsBall(0.0,-0.1);
+  // ros::Duration(5.0).sleep();
+  // command = "stop";
+  // goWalk(command);
 
   //node loop
   sensor_msgs::JointState write_msg;
@@ -247,49 +291,55 @@ int main(int argc, char **argv) {
 void tracking() {
   double xerror = 0;
   double yerror = 0;
+  if (playing){
+    if ((ball_position.x != 999 || ball_position.y != 999)) {  // Sólo jugar o quedarse quieto
+      if (search_n_walk){
+        std::string command = "stop";
+        goWalk(command);
+        ros::Duration(3.0).sleep();
+        std::cout << "veo pelota" << yerror << std::endl;
+        search_n_walk = false;
+      }
 
-  if ((ball_position.x != 999 || ball_position.y != 999) && (referee_state >= 1 && referee_state <= 2)) {  // Sólo jugar o quedarse quieto
-    xerror = (320 - ball_position.x) * 70 / 320; //-atan(ball_position.x * tan(FOV_WIDTH));
-    yerror = (240 - ball_position.y) * 70 / 240; //-atan(ball_position.y * tan(FOV_HEIGHT));
+      xerror = (320 - ball_position.x) * 70 / 320; //-atan(ball_position.x * tan(FOV_WIDTH));
+      yerror = (240 - ball_position.y) * 70 / 240; //-atan(ball_position.y * tan(FOV_HEIGHT));
 
-    std::cout << "xerror: " << xerror << std::endl;
-    std::cout << "yerror: " << yerror << std::endl;
+      // std::cout << "xerror: " << xerror << std::endl;
+      // std::cout << "yerror: " << yerror << std::endl;
+      turn_cnt = 0;
 
-    if ((xerror >= 10 || xerror <= -10) && (yerror >= 10 || yerror <= -10)) {
-      xerror = xerror * M_PI / 180;
-      yerror = yerror * M_PI / 180;
+      if ((xerror >= 10 || xerror <= -10) && (yerror >= 10 || yerror <= -10)) {
+        xerror = xerror * M_PI / 180;
+        yerror = yerror * M_PI / 180;
 
-      ros::Time curr_time = ros::Time::now();
-      ros::Duration dur = curr_time - prev_time;
+        ros::Time curr_time = ros::Time::now();
+        ros::Duration dur = curr_time - prev_time;
 
-      double delta_time = dur.nsec * 0.000000001 + dur.sec;
-      prev_time = curr_time;
+        double delta_time = dur.nsec * 0.000000001 + dur.sec;
+        prev_time = curr_time;
 
-      double xerror_dif = (xerror - current_ball_pan) / delta_time;
-      double yerror_dif = (yerror - current_ball_tilt) / delta_time;
+        double xerror_dif = (xerror - current_ball_pan) / delta_time;
+        double yerror_dif = (yerror - current_ball_tilt) / delta_time;
 
-      xerror_sum += xerror;
-      yerror_sum += yerror;
+        xerror_sum += xerror;
+        yerror_sum += yerror;
 
-      double xerror_target = xerror * p_gain + xerror_dif * d_gain + xerror_sum * i_gain;
-      double yerror_target = yerror * p_gain + yerror_dif * d_gain + yerror_sum * i_gain;
+        double xerror_target = xerror * p_gain + xerror_dif * d_gain + xerror_sum * i_gain;
+        double yerror_target = yerror * p_gain + yerror_dif * d_gain + yerror_sum * i_gain;
 
-      publishHeadJoint(xerror_target, yerror_target);
-      
-      std::string command = "stop";
-      goWalk(command);
+        publishHeadJoint(xerror_target, yerror_target);
+        
+        current_ball_pan = xerror;
+        current_ball_tilt = yerror;
+        // walkTowardsBall(current_ball_pan, current_ball_tilt);
 
+      } else {
+          walkTowardsBall(current_ball_pan, current_ball_tilt);
+      }
     } else {
-      current_ball_pan = xerror;
-      current_ball_tilt = yerror;
-      walkTowardsBall(current_ball_pan, current_ball_tilt);
+      // std::cout << "no hay pelota" << std:: endl;
+      turnToBall(current_ball_pan, current_ball_tilt);
     }
-  } else {
-    std::cout << "no hay pelota" << std:: endl;
-    std::string command = "stop";
-    goWalk(command);
-    //ros::Duration(1.0).sleep();  //cortafuegos?   -> hay que ver qué onda
-    turnToBall(current_ball_pan, current_ball_tilt);
   }
 }
 
@@ -299,7 +349,7 @@ void publishHeadJoint(double pan, double tilt) {
   
   if (tilt >= 0.34906) tilt = 0.34906;        //20 deg
   else if (tilt <= -1.2217) tilt = -1.2217;   //-70 deg
-
+  
   head_angle_msg.name.push_back("head_pan");
   head_angle_msg.position.push_back(pan);
   head_angle_msg.name.push_back("head_tilt");
@@ -324,19 +374,182 @@ void publishHeadJointSearch(double pan, double tilt) {
 }
 
 void turnToBall(double pan, double tilt) {
-  t += 1 * head_direction;
+  if (search_n_walk){
+    walkTowardsBall(0.0,-0.1);
+    ros::Duration(1.0).sleep();  //wait for module DO NOT REMOVE!!!!
+  }else{
+    std::string command = "stop";
+    goWalk(command);
+    ros::Duration(1.0).sleep();
+  }
 
-  if (t >= 360)
-      head_direction = -1;
-  else if (t <= -360)
-      head_direction = 1;
+  t += 1;
 
   x_target = 60*sin(t);
   y_target = 15*cos(t) - 30;
 
+  if (x_target >= 54 ) {
+    turn_cnt += 1;
+  }
+  std::cout << "cont:" << turn_cnt << std::endl;
+  if (turn_cnt >= 2){
+    y_target -= 20;
+  } if (turn_cnt > 3 && !search_n_walk){
+    search_n_walk = true;
+  }
+  /*} else if (turn_cnt > 4) {
+    std::string command = "stop";
+    goWalk(command);
+    ros::Duration(1.0).sleep();
+    turn_cnt = 0;
+    turn2search(3);
+  }*/
+
   x_target = (x_target*M_PI)/180;
   y_target = (y_target*M_PI)/180;
+
+  /*if (distance_to_ball < 0.43 && distance_to_ball != 0.0) {
+    y_target -= 0.17;
+  }*/
+  // std::cout << "dist to ball" << x_target << std::endl; 
   publishHeadJointSearch(x_target, y_target);
+}
+
+void turn2search(int limit) {
+  //node loop
+  sensor_msgs::JointState write_msg;
+  write_msg.header.stamp = ros::Time::now();
+  
+  setModule("none");
+  ros::Duration(1).sleep();
+  for (int i = 1; i <= limit; i++) {
+    //std::cout  << "Derechaaaa D:" << std::endl;
+    //Levantar pie derecho 
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("r_ank_pitch");
+    write_msg.position.push_back(-0.7091);
+    write_msg.name.push_back("r_knee");
+    write_msg.position.push_back(-1.4131);
+    write_msg.name.push_back("r_hip_pitch");
+    write_msg.position.push_back(0.7091 + rest_inc_giro);
+    write_msg.name.push_back("r_hip_yaw");
+    write_msg.position.push_back(0.1746*1.5);
+    write_msg.name.push_back("l_hip_yaw");
+    write_msg.position.push_back(-0.1746*1.5);
+
+    write_msg.name.push_back("l_hip_roll");
+    write_msg.position.push_back(-0.0873);
+    write_msg.name.push_back("r_hip_roll");
+    write_msg.position.push_back(0.0873);
+    write_msg.name.push_back("l_ank_roll");
+    write_msg.position.push_back(-0.0873);
+    write_msg.name.push_back("r_ank_roll");
+    write_msg.position.push_back(0.0873);
+    write_joint_pub.publish(write_msg);
+
+    //Bajar pie derecho
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("r_ank_pitch");
+    write_msg.position.push_back(positions[rows-1][0]);
+    write_msg.name.push_back("r_knee");
+    write_msg.position.push_back(positions[rows-1][1]);
+    write_msg.name.push_back("r_hip_pitch");
+    write_msg.position.push_back(positions[rows-1][2] + rest_inc_giro);
+    write_joint_pub.publish(write_msg);
+    
+    //Levantar pie izquierdo
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("l_ank_pitch");
+    write_msg.position.push_back(0.7091);
+    write_msg.name.push_back("l_knee");
+    write_msg.position.push_back(1.4131);
+    write_msg.name.push_back("l_hip_pitch");
+    write_msg.position.push_back(-0.7091 - rest_inc_giro);
+    write_msg.name.push_back("r_hip_yaw");
+    write_msg.position.push_back(0);
+    write_msg.name.push_back("l_hip_yaw");
+    write_msg.position.push_back(0);
+    write_joint_pub.publish(write_msg);
+    
+    //Bajar pie izquierdo
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("l_ank_pitch");
+    write_msg.position.push_back(positions[rows-1][3]);
+    write_msg.name.push_back("l_knee");
+    write_msg.position.push_back(positions[rows-1][4]);
+    write_msg.name.push_back("l_hip_pitch");
+    write_msg.position.push_back(positions[rows-1][5] - rest_inc_giro);
+    write_joint_pub.publish(write_msg);
+  }
+}
+
+void turn2search_left(int limit) {
+  //node loop
+  sensor_msgs::JointState write_msg;
+  write_msg.header.stamp = ros::Time::now();
+  
+  setModule("none");
+  ros::Duration(1).sleep();
+  for (int i = 1; i <= limit; i++) {
+    //std::cout  << "Derechaaaa D:" << std::endl;
+     
+    //Levantar pie izquierdo
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("l_ank_pitch");
+    write_msg.position.push_back(0.7091);
+    write_msg.name.push_back("l_knee");
+    write_msg.position.push_back(1.4131);
+    write_msg.name.push_back("l_hip_pitch");
+    write_msg.position.push_back(-0.7091 - rest_inc_giro);
+    write_msg.name.push_back("r_hip_yaw");
+    write_msg.position.push_back(0.1746*1.5);
+    write_msg.name.push_back("l_hip_yaw");
+    write_msg.position.push_back(-0.1746*1.5);
+    write_joint_pub.publish(write_msg);
+    
+    write_msg.name.push_back("l_hip_roll");
+    write_msg.position.push_back(-0.0873);
+    write_msg.name.push_back("r_hip_roll");
+    write_msg.position.push_back(0.0873);
+    write_msg.name.push_back("l_ank_roll");
+    write_msg.position.push_back(-0.0873);
+    write_msg.name.push_back("r_ank_roll");
+    write_msg.position.push_back(0.0873);
+    write_joint_pub.publish(write_msg);
+    
+    //Bajar pie izquierdo
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("l_ank_pitch");
+    write_msg.position.push_back(positions[rows-1][3]);
+    write_msg.name.push_back("l_knee");
+    write_msg.position.push_back(positions[rows-1][4]);
+    write_msg.name.push_back("l_hip_pitch");
+    write_msg.position.push_back(positions[rows-1][5] - rest_inc_giro);
+    write_joint_pub.publish(write_msg);
+    
+    //Levantar pie derecho 
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("r_ank_pitch");
+    write_msg.position.push_back(-0.7091);
+    write_msg.name.push_back("r_knee");
+    write_msg.position.push_back(-1.4131);
+    write_msg.name.push_back("r_hip_pitch");
+    write_msg.position.push_back(0.7091 + rest_inc_giro);
+    write_msg.name.push_back("r_hip_yaw");
+    write_msg.position.push_back(0);
+    write_msg.name.push_back("l_hip_yaw");
+    write_msg.position.push_back(0);
+
+    //Bajar pie derecho
+    ros::Duration(0.1).sleep();
+    write_msg.name.push_back("r_ank_pitch");
+    write_msg.position.push_back(positions[rows-1][0]);
+    write_msg.name.push_back("r_knee");
+    write_msg.position.push_back(positions[rows-1][1]);
+    write_msg.name.push_back("r_hip_pitch");
+    write_msg.position.push_back(positions[rows-1][2] + rest_inc_giro);
+    write_joint_pub.publish(write_msg);
+  }
 }
 
 void walkTowardsBall(double pan, double tilt) {
@@ -355,11 +568,11 @@ void walkTowardsBall(double pan, double tilt) {
 
   double distance_to_kick = 0.22;  //0.22
 
-  std::cout << distance_to_ball << std::endl;
+  // std::cout << distance_to_ball << std::endl;
   
   if (distance_to_ball < distance_to_kick) { //&& (fabs(ball_x_angle) < 25.0) to kick
     count_to_kick_ += 1;	
-    std::cout << count_to_kick_ << std::endl;
+    // std::cout << count_to_kick_ << std::endl;
     if (count_to_kick_ > 20) {
       std::string command = "stop";
       goWalk(command);
@@ -386,15 +599,27 @@ void walkTowardsBall(double pan, double tilt) {
 
   double fb_move = 0.0, rl_angle = 0.0;
   double distance_to_walk = distance_to_ball - distance_to_kick;
-
-  calcFootstep(distance_to_walk, pan, delta_time_walk, fb_move, rl_angle);
-
-  getWalkingParam();
-  setWalkingParam(fb_move, 0, rl_angle, true);
   
-  std_msgs::String command_msg;
-  command_msg.data = "start";
-  walk_command_pub.publish(command_msg);
+  // if (pan > 0.262){
+  //   turn2search(2);
+  //   std::string command = "stop";
+  //   goWalk(command);
+  //   ros::Duration(1).sleep();
+  // }else if (pan < -0.262){
+  //   turn2search_left(2); 
+  //   std::string command = "stop";
+  //   goWalk(command);
+  //   ros::Duration(1).sleep();
+  // }else{
+    calcFootstep(distance_to_walk, pan, delta_time_walk, fb_move, rl_angle);
+
+    getWalkingParam();
+    setWalkingParam(fb_move, 0, rl_angle, true);
+    
+    std_msgs::String command_msg;
+    command_msg.data = "start";
+    walk_command_pub.publish(command_msg);
+  //}
 }
 
 // void tracking(){
@@ -545,7 +770,7 @@ void callbackImu(const sensor_msgs::Imu::ConstPtr& msg) {
     present_pitch_ = pitch;
   else
     present_pitch_ = present_pitch_ * (1 - alpha) + pitch * alpha;
-  std::cout << present_pitch_ << std::endl;
+  // std::cout << present_pitch_ << std::endl;
   if (present_pitch_ > FALL_FORWARD_LIMIT) {
     goAction(122);
     setModule("none");
@@ -645,16 +870,24 @@ bool isActionRunning() {
   return false;
 }
 
-void callbackReferee(const soccer_pkg::referee& msg) {
-  /*
-  0 = "quieto"
-  1 = "acomodate"
-  2 = "playing"
-  3 = "acercate"
-  4 = "alejate"
-  */
-  referee_state = msg.I
-}
+// void callbackReferee(const soccer_pkg::referee& msg) {
+//   /*
+//   0 = "quieto"
+//   1 = "acomodate"
+//   2 = "playing"
+//   3 = "acercate"
+//   4 = "alejate"
+//   */
+//   referee_state = msg.I;
+
+//   if (referee_state >= 1 && referee_state <= 2){
+//     playing = true;
+//   }else{
+//     playing = false;
+//     std::string command = "stop";
+//     goWalk(command);
+//   }
+// }
 
 void buttonHandlerCallback(const std_msgs::String::ConstPtr& msg) {
   // in the middle of playing demo
